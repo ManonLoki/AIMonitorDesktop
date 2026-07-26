@@ -1,0 +1,4 @@
+interface:
+  display_name: "AIMonitorDesktop 构建发布"
+  short_description: "构建并发布 AIMonitorDesktop 的 macOS 与 Windows 安装包"
+  default_prompt: "使用 $build-aimonitor-desktop 检查环境并构建 AIMonitorDesktop 发布产物。"

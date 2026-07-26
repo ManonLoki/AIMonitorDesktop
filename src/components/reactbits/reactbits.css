@@ -1,0 +1,31 @@
+.reactbits-spotlight {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.reactbits-spotlight::before {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  background: radial-gradient(
+    420px circle at var(--mouse-x) var(--mouse-y),
+    var(--spotlight-color),
+    transparent 68%
+  );
+  content: "";
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 360ms ease;
+}
+
+.reactbits-spotlight > * { position: relative; z-index: 1; }
+
+.reactbits-spotlight:hover::before,
+.reactbits-spotlight:focus-within::before {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reactbits-spotlight::before { transition: none; }
+}
