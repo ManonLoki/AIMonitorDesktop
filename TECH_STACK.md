@@ -6,34 +6,37 @@
 | --- | --- | --- |
 | 桌面运行时 | Tauri 2 | 原生窗口、系统能力、Rust 命令与应用打包 |
 | UI 视图 | React 19 + TypeScript | 组件与视图逻辑 |
-| UI 组件 | Mantine 9 | 布局、表单、反馈、主题与可访问性基础 |
 | UI 动效 | React Bits + GSAP 3 | 页面入场、滚动呈现与轻量交互反馈；组件源码收敛在项目内 |
-| 路由 | TanStack Router | 页面导航、路由参数与路由级数据协调 |
-| 服务端状态 | TanStack Query | 请求缓存、失效、重试与异步状态 |
-| HTTP 客户端 | Axios | 请求实例、拦截器、超时与传输层配置 |
-| 客户端状态 | Jotai | 跨组件本地状态；不承载服务端缓存 |
+| 前后端通信 | `@tauri-apps/api`（invoke / event） | 前端通过 `invoke` 调用 Rust 命令，通过 `listen("monitor-state-changed", ...)` 订阅状态变化；不经过 HTTP |
 | 构建 | Vite 8 | 前端开发服务器与生产构建 |
 | 包管理 | pnpm 10 | 使用 `pnpm-lock.yaml` 与精确依赖版本 |
+
+页面内没有独立的服务端状态管理、路由或客户端全局状态库：整个应用只有"监控画布"与"设置"两个本地 UI 切换态，全部数据来自 Rust 侧的单一 `Runtime`（见 `src-tauri/src/lib.rs`），通过 `useMonitorState`（`src/hooks/useMonitorState.ts`）拉取与订阅。此前预留的 Mantine、TanStack Router/Query、Axios、Jotai 均未被实际使用，已从依赖中移除；如未来需要更复杂的路由/服务端状态/表单能力，再按需引入并回填这张表。
 
 ## 目录约定
 
 ```text
 src/
-├── api/           # Axios 实例、请求函数、Query Options
-├── components/    # 通用组件与 React Bits 动效组件
-├── pages/         # 路由页面
-├── state/         # Jotai atoms
-├── main.tsx       # 应用 Provider 组合
-├── query-client.ts
-└── router.tsx
+├── components/
+│   ├── Icon.tsx          # 内联 SVG 图标集合
+│   ├── MonitorCanvas.tsx # 监控画布（宫格渲染）
+│   ├── SettingsPanel.tsx # 设置页
+│   └── reactbits/        # React Bits 动效组件（AnimatedContent、SpotlightCard）
+├── hooks/
+│   └── useMonitorState.ts # 订阅 Rust 侧状态的唯一数据源
+├── types/
+│   └── monitor.ts        # MonitorState / MonitorTile 等共享类型
+├── MonitorApp.tsx         # 应用根组件（侧边栏 + 工作区）
+├── main.tsx                # 应用入口
+└── styles.css
 ```
+
+后端只有一个文件 `src-tauri/src/lib.rs`：状态管理、手写 HTTP 服务器（Android 兼容 API）、UDP 发现、mDNS 注册都在其中，共享同一个 `Arc<Runtime>`。
 
 ## 约束
 
-1. HTTP 请求统一通过 `src/api/client.ts` 的 Axios 实例。
-2. 服务端数据统一交给 TanStack Query 管理，不复制进 Jotai。
-3. Jotai 仅保存客户端共享状态，例如偏好、当前工作区和 UI 状态。
-4. 页面导航统一注册到 TanStack Router。
-5. 优先使用 Mantine 组件和主题 token，避免重复建设基础组件。
-6. 动效必须尊重 `prefers-reduced-motion`，避免长时间循环或妨碍操作的过场。
-7. 升级依赖时同时更新精确版本、pnpm 锁文件和本文件中的主版本说明。
+1. 前端与后端的数据通路统一走 Tauri `invoke`（写）+ `listen("monitor-state-changed")`（读），不引入 HTTP 客户端做进程内通信。
+2. Rust 侧暴露给局域网的 HTTP API（`/health`、`/api/device`、`/api/config`、`/api/images`、`/api/slots/{slot}`）需与 Android 版保持兼容，改动前核对字段与状态码。
+3. 优先复用 `src/components/` 下已有组件，避免重复建设。
+4. 动效必须尊重 `prefers-reduced-motion`，避免长时间循环或妨碍操作的过场。
+5. 升级依赖时同时更新精确版本、pnpm 锁文件和本文件中的主版本说明；引入新基础设施前先确认本表是否已有等价方案。

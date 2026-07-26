@@ -6,10 +6,8 @@ AI监控平台桌面版，由 ManonLoki 开发。
 
 - 桌面框架：Tauri 2
 - 前端框架：React 19 + TypeScript
-- UI 组件与动效：Mantine + React Bits + GSAP
-- 路由：TanStack Router
-- 服务端状态与网络请求：TanStack Query + Axios
-- 客户端状态：Jotai
+- UI 动效：React Bits + GSAP
+- 前后端通信：`@tauri-apps/api`（invoke / event），不经过 HTTP
 - 构建工具：Vite 8
 - 包管理器：pnpm（依赖使用精确版本并提交锁文件）
 

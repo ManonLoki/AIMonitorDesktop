@@ -25,6 +25,8 @@ export function SpotlightCard({
 }: SpotlightCardProps) {
   const cardRef = useRef<HTMLDivElement>(null);
 
+  // 直接写 CSS 自定义属性而非 setState，避免鼠标移动时触发 React 重渲染；
+  // 光晕效果完全交给 reactbits.css 里基于 --mouse-x/--mouse-y 的径向渐变绘制。
   const handleMouseMove: MouseEventHandler<HTMLDivElement> = (event) => {
     const card = cardRef.current;
     if (card) {
