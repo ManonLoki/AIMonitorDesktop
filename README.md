@@ -4,9 +4,17 @@ AI监控平台桌面版，由 ManonLoki 开发。
 
 ## 实机截图
 
+### 监控界面
+
 ![AIMonitorDesktop macOS 实机运行界面](./docs/screenshots/monitor-dashboard.jpg)
 
 > macOS 实机运行效果：2 × 2 监控宫格，其中一个终端正在上报内容。
+
+### 设置界面
+
+![AIMonitorDesktop macOS 设置界面](./docs/screenshots/settings.jpg)
+
+> 可配置开机自启、设备名称、监控宫格和画布图片显示方式，并查看局域网服务信息。
 
 ## 技术栈
 
