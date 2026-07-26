@@ -2,6 +2,12 @@
 
 AI监控平台桌面版，由 ManonLoki 开发。
 
+## 实机截图
+
+![AIMonitorDesktop macOS 实机运行界面](./docs/screenshots/monitor-dashboard.jpg)
+
+> macOS 实机运行效果：2 × 2 监控宫格，其中一个终端正在上报内容。
+
 ## 技术栈
 
 - 桌面框架：Tauri 2
