@@ -1,4 +1,5 @@
 // POST/DELETE /api/slots/{1..25}：更新或清空单个监控宫格。
+use super::error_json;
 use crate::image::safe_image_filename;
 use crate::model::MonitorTile;
 use crate::runtime::SharedRuntime;
@@ -11,11 +12,6 @@ use axum::{
 };
 use serde_json::{json, Value};
 use std::time::{SystemTime, UNIX_EPOCH};
-
-// 统一构造 `{"error": "..."}` 形式的 JSON 错误响应。
-fn error_json(status: StatusCode, message: &str) -> Response {
-    (status, Json(json!({ "error": message }))).into_response()
-}
 
 // 宫格编号对外是 1-25（与 Android 版一致），内部数组下标是 0-24；
 // 解析失败或越界统一返回 404，与原手写实现保持一致（不区分是否合法数字）。

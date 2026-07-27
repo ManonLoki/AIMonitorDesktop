@@ -2,6 +2,7 @@
 // 所有文件 I/O 都走 tokio::fs（见 image.rs 的 probe_image_file），保持整条请求链路
 // 纯异步、不阻塞 Tokio 工作线程；multipart 解析仍是手写的小函数，因为图片上传接口
 // 只有一个文件字段，不需要为此引入完整的 multipart 依赖。
+use super::error_json;
 use crate::image::{detect_image, make_gif_loop_forever, probe_image_file, safe_image_filename};
 use crate::runtime::SharedRuntime;
 use axum::{
@@ -11,14 +12,18 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
+use serde::Deserialize;
 use serde_json::{json, Value};
-use std::collections::HashMap;
+use tokio::task::JoinSet;
 use uuid::Uuid;
 
-// 统一构造 `{"error": "..."}` 形式的 JSON 错误响应，与手写实现时期的错误结构保持一致，
-// 这样 Android 端已有的错误处理逻辑不需要改动。
-fn error_json(status: StatusCode, message: &str) -> Response {
-    (status, Json(json!({ "error": message }))).into_response()
+// 分页查询参数；字段保留为 Option<String> 而非 Option<usize>，
+// 这样非法数字（如 "abc"）不会在提取阶段就被 Axum 拒绝并返回它自带的错误格式，
+// 而是走下面手写的校验逻辑，继续产出与 Android 端约定一致的 `{"error": "..."}`。
+#[derive(Deserialize)]
+pub(crate) struct Pagination {
+    offset: Option<String>,
+    limit: Option<String>,
 }
 
 // 从 multipart/form-data 请求体中截取第一个字段的原始内容。非 multipart 请求
@@ -88,10 +93,10 @@ pub(crate) async fn upload_image(
 // 而不是把每个文件整体读入内存——见 image.rs 中该函数上方的注释。
 pub(crate) async fn list_images(
     State(runtime): State<SharedRuntime>,
-    Query(query): Query<HashMap<String, String>>,
+    Query(query): Query<Pagination>,
 ) -> Response {
-    let offset = query.get("offset").map(|v| v.parse::<usize>()).transpose(); // 解析失败会在下面统一报错
-    let limit = query.get("limit").map(|v| v.parse::<usize>()).transpose();
+    let offset = query.offset.map(|v| v.parse::<usize>()).transpose(); // 解析失败会在下面统一报错
+    let limit = query.limit.map(|v| v.parse::<usize>()).transpose();
     let (offset, limit) = match (offset, limit) {
         (Ok(offset), Ok(limit)) => (offset.unwrap_or(0), limit.unwrap_or(50)), // 未提供时的默认分页参数
         _ => {
@@ -108,12 +113,19 @@ pub(crate) async fn list_images(
         );
     }
 
+    // 先收集目录项，再用 JoinSet 并发探测每个文件的魔数与大小——各文件的探测
+    // 互不依赖，且结果反正要重新按文件名排序，谁先完成不影响最终顺序。
     let mut images: Vec<Value> = Vec::new();
     if let Ok(mut dir) = tokio::fs::read_dir(&runtime.image_dir).await {
+        let mut probes = JoinSet::new();
         while let Ok(Some(entry)) = dir.next_entry().await {
-            // 异步遍历目录，逐个探测；探测失败（非图片文件等）的条目直接跳过
             let name = entry.file_name().to_string_lossy().into_owned(); // 文件名（非法 UTF-8 会被替换字符处理）
-            if let Some((mime, size)) = probe_image_file(&entry.path()).await {
+            let path = entry.path();
+            probes.spawn(async move { probe_image_file(&path).await.map(|probe| (name, probe)) });
+        }
+        while let Some(result) = probes.join_next().await {
+            // Err 分支只会在探测任务 panic 时出现，属于不该发生的异常情况，直接丢弃该条目即可。
+            if let Ok(Some((name, (mime, size)))) = result {
                 images.push(
                     json!({ "filename": name, "mimeType": mime, "size": size, "url": format!("/api/images/{name}") }),
                 );

@@ -46,8 +46,8 @@ src-tauri/src/
 ├── discovery.rs             # UDP 发现，tokio::net::UdpSocket，纯异步
 ├── mdns.rs                   # mDNS 注册（mdns-sd 内部自带常驻线程，是该库自身实现）
 └── http/                     # 基于 Axum 的纯异步 HTTP 服务器
-    ├── mod.rs                # build_router + start_http_server（tokio::net::TcpListener + axum::serve）
-    └── routes/{mod,device,images,slots}.rs
+    ├── mod.rs                # build_router + start_http_server（tokio::net::TcpListener + axum::serve）+ 共享 error_json
+    └── {device,images,slots}.rs  # 按资源拆分的处理函数，直接挂在 http/ 下（没有额外的 routes/ 嵌套层）
 ```
 
 ## 约束

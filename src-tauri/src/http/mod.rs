@@ -1,14 +1,17 @@
 // 基于 Axum 的纯异步 HTTP 服务器：路由挂载、CORS、端口自动选择、后台任务派生。
 // 不再有手写的 TcpListener 解析或线程池——每个连接由 Tokio 调度到独立的异步任务，
-// 具体的资源处理函数在 routes 子模块，按 method + path 拆分到各自的文件。
-mod routes;
+// 具体的资源处理函数按 method + path 拆分到 device.rs / images.rs / slots.rs。
+mod device;
+mod images;
+mod slots;
 
 use crate::constants::{FIRST_HTTP_PORT, MAX_BODY_BYTES};
 use crate::runtime::SharedRuntime;
 use axum::{
-    extract::DefaultBodyLimit,
+    extract::{DefaultBodyLimit, Request},
     http::{Method, StatusCode},
-    response::IntoResponse,
+    middleware::{self, Next},
+    response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router,
 };
@@ -17,24 +20,30 @@ use std::net::Ipv4Addr;
 use tokio::net::TcpListener;
 use tower_http::cors::{Any, CorsLayer};
 
+// 统一构造 `{"error": "..."}` 形式的 JSON 错误响应，供 device/images/slots 三个
+// 资源模块与下面的 404 兜底共用，避免每个模块各自重复同一段拼装逻辑。
+pub(crate) fn error_json(status: StatusCode, message: &str) -> Response {
+    (status, Json(json!({ "error": message }))).into_response()
+}
+
 // 组装所有路由；.with_state(runtime) 之后，每个 handler 都能通过 State 提取器
 // 拿到同一份 Arc<Runtime>，等价于原来手写实现里到处传递的 &SharedRuntime。
 fn build_router(runtime: SharedRuntime) -> Router {
     Router::new()
-        .route("/health", get(routes::device::health))
-        .route("/api/config", get(routes::device::get_config))
-        .route("/api/device", get(routes::device::get_device))
+        .route("/health", get(device::health))
+        .route("/api/config", get(device::get_config))
+        .route("/api/device", get(device::get_device))
         .route(
             "/api/images",
-            get(routes::images::list_images).post(routes::images::upload_image),
+            get(images::list_images).post(images::upload_image),
         )
         .route(
             "/api/images/{filename}",
-            get(routes::images::get_image).delete(routes::images::delete_image),
+            get(images::get_image).delete(images::delete_image),
         )
         .route(
             "/api/slots/{slot}",
-            post(routes::slots::update_slot).delete(routes::slots::clear_slot),
+            post(slots::update_slot).delete(slots::clear_slot),
         )
         .fallback(not_found)
         .layer(
@@ -47,12 +56,27 @@ fn build_router(runtime: SharedRuntime) -> Router {
         )
         // 单次请求体上限，超出直接拒绝，避免恶意/异常请求占满内存（图片上传走这里）。
         .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
+        // DefaultBodyLimit 不是路由层面的拒绝，而是在 Bytes 提取器读取请求体时
+        // 直接产生一个纯文本的 413 响应；用这个中间件统一改写成与其他 handler
+        // 一致的 JSON 错误结构，避免这一种失败路径悄悄破坏 Android 端的错误契约。
+        .layer(middleware::from_fn(normalize_body_limit_rejection))
         .with_state(runtime)
+}
+
+// 把 DefaultBodyLimit 触发的默认 413 响应改写为 `{"error": "..."}`。
+// 本项目里不会有 handler 主动返回 413，所以只要看到这个状态码，就一定来自
+// DefaultBodyLimit 的提取器拒绝，可以放心整体替换而不会误伤其他响应。
+async fn normalize_body_limit_rejection(request: Request, next: Next) -> Response {
+    let response = next.run(request).await;
+    if response.status() == StatusCode::PAYLOAD_TOO_LARGE {
+        return error_json(StatusCode::PAYLOAD_TOO_LARGE, "request body too large");
+    }
+    response
 }
 
 // 兜底 404：未匹配任何注册路由时返回，错误结构与手写实现时期保持一致。
 async fn not_found() -> impl IntoResponse {
-    (StatusCode::NOT_FOUND, Json(json!({ "error": "not found" })))
+    error_json(StatusCode::NOT_FOUND, "not found")
 }
 
 // 启动 HTTP 服务器：先同步阻塞查找从 FIRST_HTTP_PORT 起第一个可绑定端口

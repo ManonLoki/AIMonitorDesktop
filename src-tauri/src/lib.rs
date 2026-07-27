@@ -14,7 +14,9 @@
 // - window_geometry.rs    窗口几何的可用性判断、恢复与保存
 // - discovery.rs          UDP 主动发现（纯异步）
 // - mdns.rs                mDNS 服务注册
-// - http/                 基于 Axum 的纯异步 HTTP 服务器：路由挂载 + routes（按资源分发）
+// - http/                 基于 Axum 的纯异步 HTTP 服务器：mod.rs 负责路由挂载与共享的
+//                          error_json 错误响应助手，device.rs/images.rs/slots.rs 按资源
+//                          拆分处理函数（无额外的子目录嵌套）
 //
 // 三个并发子系统（在 setup 回调里一起启动，共享同一个 Arc<Runtime>）：
 // 1. HTTP 服务器：Axum + Tokio 纯异步实现，提供与 Android 版兼容的 REST API；
@@ -44,6 +46,16 @@ use window_geometry::{restore_window, save_window_geometry};
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // 单实例限制：必须是注册的第一个插件（Tauri 官方要求），否则无法保证在
+        // 其他插件初始化之前拦截到"已有实例正在运行"这一事件。第二次启动时不再
+        // 创建新窗口/新进程，而是把已运行实例的主窗口取消最小化、显示并置前。
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize(); // 若已最小化，先恢复正常大小
+                let _ = window.show(); // 若窗口曾被隐藏，重新显示
+                let _ = window.set_focus(); // 置于最前并获得输入焦点
+            }
+        }))
         .plugin(tauri_plugin_autostart::Builder::new().build()) // 开机自启插件
         .plugin(tauri_plugin_opener::init()) // 系统级"用默认程序打开"插件（前端未直接用到，但保留通用能力）
         .setup(|app| {
