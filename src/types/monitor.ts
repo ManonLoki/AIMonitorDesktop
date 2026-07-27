@@ -45,7 +45,7 @@ export const previewState: MonitorState = {
   imageDisplayMode: "FIT_CENTER", // 预览时的默认图片显示模式
   autoStart: false, // 预览时默认未开启自启
   port: 10241, // 预览时展示的默认端口（与后端 FIRST_HTTP_PORT 一致）
-  appVersion: "1.0.2", // 预览时展示的占位版本号
+  appVersion: "1.0.3", // 预览时展示的占位版本号
   deviceId: "初始化中", // 真实设备 ID 尚未从后端拉取到时的占位文案
   deviceName: "AIMonitorDesktop", // 预览时的默认设备名
   isServerRunning: false, // 预览时服务尚未启动
