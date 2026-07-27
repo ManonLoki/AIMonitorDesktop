@@ -98,6 +98,9 @@ nav button span { font-size: 14px; font-weight: 600; }
 .setting-value + .setting-value { margin-top: 7px; }
 .setting-value span { color: var(--muted); font-size: 12px; white-space: nowrap; }
 .setting-value strong { min-width: 0; overflow: hidden; color: #273043; font-size: 12px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.setting-link { min-width: 0; padding: 0; overflow: hidden; color: var(--primary); border: 0; background: transparent; cursor: pointer; font-size: 12px; font-weight: 600; text-align: right; text-decoration: none; text-overflow: ellipsis; white-space: nowrap; }
+.setting-link:hover { text-decoration: underline; }
+.setting-link:focus-visible { border-radius: 3px; outline: 2px solid var(--primary); outline-offset: 3px; }
 .choice-row { display: flex; justify-content: space-between; align-items: center; gap: 20px; }
 .choice-row + .choice-row { margin-top: 17px; }
 .number-choices { display: flex; gap: 7px; }

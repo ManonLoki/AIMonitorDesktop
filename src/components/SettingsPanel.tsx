@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { AnimatedContent } from "./reactbits/AnimatedContent";
 import { SpotlightCard } from "./reactbits/SpotlightCard";
 import { Icon } from "./Icon";
@@ -11,6 +12,18 @@ function SettingRow({ label, value }: { label: string; value: string }) {
     <div className="setting-value">
       <span>{label}</span>
       <strong title={value}>{value}</strong>
+    </div>
+  );
+}
+
+// 可点击的外部链接行，通过 Tauri opener 交给系统默认浏览器打开。
+function ExternalLinkRow({ label, url }: { label: string; url: string }) {
+  return (
+    <div className="setting-value">
+      <span>{label}</span>
+      <button className="setting-link" title={url} onClick={() => void openUrl(url)}>
+        {url}
+      </button>
     </div>
   );
 }
@@ -73,10 +86,12 @@ export function SettingsPanel({
   return (
     <main className="settings-page" id="settings-scroll-container">
       <div className="settings-content">
-        {/* 版本信息卡片 */}
+        {/* 应用信息卡片 */}
         <AnimatedContent container="#settings-scroll-container" delay={0.04} distance={16}>
           <SpotlightCard className="version-card">
             <SettingRow label="当前 APP 版本" value={state.appVersion} />
+            <SettingRow label="作者" value="ManonLoki" />
+            <ExternalLinkRow label="GitHub 地址" url="https://github.com/ManonLoki/AIMonitorDesktop" />
           </SpotlightCard>
         </AnimatedContent>
 

@@ -1,6 +1,6 @@
 [package]
 name = "aimonitor-desktop"
-version = "1.0.3"
+version = "1.0.4"
 description = "AI监控平台桌面版"
 authors = ["ManonLoki"]
 edition = "2021"
