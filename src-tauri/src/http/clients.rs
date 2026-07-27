@@ -16,10 +16,6 @@ pub(crate) async fn heartbeat(
     if !valid_client_id(&client_id) {
         return error_json(StatusCode::BAD_REQUEST, "invalid clientId");
     }
-    runtime
-        .client_leases
-        .lock()
-        .expect("client lease lock poisoned")
-        .heartbeat(&client_id);
+    runtime.heartbeat_client(&client_id);
     Json(json!({ "status": "alive", "clientId": client_id })).into_response()
 }

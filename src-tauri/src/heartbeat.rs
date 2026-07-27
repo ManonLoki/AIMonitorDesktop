@@ -1,8 +1,8 @@
-// 控制端心跳租约及过期槽位清理。
+// 控制端心跳租约及过期槽位清理；清理任务作为 Tokio 后台任务运行（与 discovery.rs
+// 的 UDP 监听一致），不占用独立的阻塞 std::thread。
 use crate::{model::MonitorTile, runtime::SharedRuntime};
 use std::{
     collections::{HashMap, HashSet},
-    thread,
     time::{Duration, Instant},
 };
 
@@ -20,14 +20,14 @@ impl ClientLeases {
     }
 
     fn expire(&mut self, now: Instant, timeout: Duration) -> HashSet<String> {
-        let expired = self
-            .last_seen
-            .iter()
-            .filter(|(_, last_seen)| now.duration_since(**last_seen) >= timeout)
-            .map(|(client_id, _)| client_id.clone())
-            .collect::<HashSet<_>>();
-        self.last_seen
-            .retain(|client_id, _| !expired.contains(client_id));
+        let mut expired = HashSet::new();
+        self.last_seen.retain(|client_id, last_seen| {
+            let alive = now.duration_since(*last_seen) < timeout;
+            if !alive {
+                expired.insert(client_id.clone());
+            }
+            alive
+        });
         expired
     }
 }
@@ -52,10 +52,10 @@ fn clear_tiles_owned_by(tiles: &mut [MonitorTile], expired: &HashSet<String>) ->
 }
 
 pub(crate) fn start_cleanup(runtime: SharedRuntime) {
-    thread::Builder::new()
-        .name("aimonitor-heartbeat-cleanup".to_owned())
-        .spawn(move || loop {
-            thread::sleep(SWEEP_INTERVAL);
+    tauri::async_runtime::spawn(async move {
+        let mut ticker = tokio::time::interval(SWEEP_INTERVAL);
+        loop {
+            ticker.tick().await;
             let expired = runtime
                 .client_leases
                 .lock()
@@ -70,8 +70,8 @@ pub(crate) fn start_cleanup(runtime: SharedRuntime) {
             if changed {
                 runtime.changed();
             }
-        })
-        .expect("无法启动心跳清理线程");
+        }
+    });
 }
 
 #[cfg(test)]

@@ -95,6 +95,14 @@ impl Runtime {
     pub(crate) fn changed(&self) {
         let _ = self.app.emit("monitor-state-changed", ()); // 事件无载荷，前端收到后自行重新拉取全量状态
     }
+
+    // 续租控制端心跳；HTTP 端两个入口（心跳接口、更新槽位）共用同一处加锁逻辑。
+    pub(crate) fn heartbeat_client(&self, client_id: &str) {
+        self.client_leases
+            .lock()
+            .expect("client lease lock poisoned")
+            .heartbeat(client_id);
+    }
 }
 
 // 读取 preferences.json；文件不存在或损坏时回退到一组合理默认值（含随机生成的新设备 ID）。

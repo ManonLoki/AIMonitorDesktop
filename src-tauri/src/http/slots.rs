@@ -92,11 +92,7 @@ pub(crate) async fn update_slot(
             "image must be a valid uploaded filename", // 文件名不合法（可能是伪造路径）
         );
     }
-    runtime
-        .client_leases
-        .lock()
-        .expect("client lease lock poisoned")
-        .heartbeat(client_id);
+    runtime.heartbeat_client(client_id);
     runtime.state.write().expect("state lock poisoned").tiles[index] = MonitorTile {
         client_id: client_id.into(),
         username: username.into(),
