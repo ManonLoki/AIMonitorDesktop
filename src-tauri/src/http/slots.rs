@@ -1,5 +1,6 @@
 // POST/DELETE /api/slots/{1..25}：更新或清空单个监控宫格。
 use super::error_json;
+use crate::heartbeat::valid_client_id;
 use crate::image::safe_image_filename;
 use crate::model::MonitorTile;
 use crate::runtime::SharedRuntime;
@@ -56,6 +57,11 @@ pub(crate) async fn update_slot(
         .and_then(Value::as_str)
         .unwrap_or("")
         .trim(); // 缺省或非字符串都当作空字符串处理，再统一裁剪空白
+    let client_id = payload
+        .get("clientId")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim();
     let ai_name = payload
         .get("aiName")
         .and_then(Value::as_str)
@@ -66,6 +72,9 @@ pub(crate) async fn update_slot(
         .and_then(Value::as_str)
         .unwrap_or("")
         .trim();
+    if !valid_client_id(client_id) {
+        return error_json(StatusCode::BAD_REQUEST, "clientId is required");
+    }
     if username.is_empty() {
         return error_json(StatusCode::BAD_REQUEST, "username is required"); // 必填字段校验
     }
@@ -83,7 +92,13 @@ pub(crate) async fn update_slot(
             "image must be a valid uploaded filename", // 文件名不合法（可能是伪造路径）
         );
     }
+    runtime
+        .client_leases
+        .lock()
+        .expect("client lease lock poisoned")
+        .heartbeat(client_id);
     runtime.state.write().expect("state lock poisoned").tiles[index] = MonitorTile {
+        client_id: client_id.into(),
         username: username.into(),
         ai_name: ai_name.into(),
         content: payload

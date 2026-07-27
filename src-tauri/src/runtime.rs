@@ -3,6 +3,7 @@
 // （即 Arc<Runtime>）读写同一份状态。
 use crate::constants::FIRST_HTTP_PORT;
 use crate::device_info::{default_device_name, local_ipv4};
+use crate::heartbeat::ClientLeases;
 use crate::model::{MonitorState, MonitorTile, Preferences, WindowGeometry};
 use std::{
     fs,
@@ -20,6 +21,7 @@ pub(crate) struct Runtime {
     pub(crate) image_dir: PathBuf, // 图片文件落盘目录（应用缓存目录下）
     preferences_path: PathBuf,     // preferences.json 的完整路径，只在本文件内使用
     pub(crate) window_geometry: Mutex<Option<WindowGeometry>>, // 待落盘的最新窗口几何
+    pub(crate) client_leases: Mutex<ClientLeases>, // 控制端心跳租约，跨 HTTP 请求共享
     pub(crate) app: AppHandle,     // 用于向前端发送事件、访问自启动插件
 }
 
@@ -55,6 +57,7 @@ impl Runtime {
             image_dir,
             preferences_path,
             window_geometry: Mutex::new(preferences.window), // 初始值来自历史偏好，之后由窗口事件持续更新
+            client_leases: Mutex::new(ClientLeases::default()),
             app,
         })
     }
@@ -100,12 +103,12 @@ pub(crate) fn load_preferences(path: &Path) -> Preferences {
         .ok() // 文件不存在/读取失败则转为 None
         .and_then(|bytes| serde_json::from_slice(&bytes).ok()) // 内容不是合法 JSON 或字段不匹配也转为 None
         .unwrap_or_else(|| Preferences {
-            rows: 2,                                           // 默认 2 行
-            columns: 2,                                        // 默认 2 列
+            rows: 2,                                                       // 默认 2 行
+            columns: 2,                                                    // 默认 2 列
             image_display_mode: crate::model::ImageDisplayMode::default(), // 默认等比缩放
-            auto_start: false,                                 // 默认不开机自启
+            auto_start: false,                                             // 默认不开机自启
             window: None, // 默认无历史窗口几何，交给 restore_window 走最大化兜底
             device_id: Uuid::new_v4().to_string(), // 首次启动生成一个新的随机设备 ID
-            device_name: default_device_name(),    // 首次启动用主机名作为默认设备名
+            device_name: default_device_name(), // 首次启动用主机名作为默认设备名
         })
 }

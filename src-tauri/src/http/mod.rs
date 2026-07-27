@@ -1,6 +1,7 @@
 // 基于 Axum 的纯异步 HTTP 服务器：路由挂载、CORS、端口自动选择、后台任务派生。
 // 不再有手写的 TcpListener 解析或线程池——每个连接由 Tokio 调度到独立的异步任务，
 // 具体的资源处理函数按 method + path 拆分到 device.rs / images.rs / slots.rs。
+mod clients;
 mod device;
 mod images;
 mod slots;
@@ -33,6 +34,10 @@ fn build_router(runtime: SharedRuntime) -> Router {
         .route("/health", get(device::health))
         .route("/api/config", get(device::get_config))
         .route("/api/device", get(device::get_device))
+        .route(
+            "/api/clients/{client_id}/heartbeat",
+            post(clients::heartbeat),
+        )
         .route(
             "/api/images",
             get(images::list_images).post(images::upload_image),

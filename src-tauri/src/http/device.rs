@@ -30,6 +30,6 @@ pub(crate) async fn get_device(State(runtime): State<SharedRuntime>) -> impl Int
         "port": state.port,
         "rows": state.rows,
         "columns": state.columns,
-        "capabilities": ["images", "slots"] // 声明本服务支持的能力集合，供客户端做特性探测
+        "capabilities": ["images", "slots", "heartbeats"] // 声明本服务支持的能力集合，供客户端做特性探测
     }))
 }

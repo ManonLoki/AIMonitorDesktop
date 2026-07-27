@@ -7,11 +7,13 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct MonitorTile {
-    pub(crate) username: String,                // 推送方设置的用户名
-    pub(crate) ai_name: String,                  // 推送方设置的 AI 名称
-    pub(crate) content: String,                  // 展示的正文内容
-    pub(crate) image_filename: Option<String>,   // 已上传图片的文件名，未设置则不展示图片
-    pub(crate) updated_at_millis: Option<u64>,   // 最近一次更新的毫秒时间戳，未设置表示宫格从未被写入
+    #[serde(skip)]
+    pub(crate) client_id: String, // 控制端所有者，仅用于心跳租约清理
+    pub(crate) username: String,               // 推送方设置的用户名
+    pub(crate) ai_name: String,                // 推送方设置的 AI 名称
+    pub(crate) content: String,                // 展示的正文内容
+    pub(crate) image_filename: Option<String>, // 已上传图片的文件名，未设置则不展示图片
+    pub(crate) updated_at_millis: Option<u64>, // 最近一次更新的毫秒时间戳，未设置表示宫格从未被写入
 }
 
 // 图片显示模式：等比缩放（留黑边）或铺满裁剪，序列化为大写下划线风格与 Android 版对齐。

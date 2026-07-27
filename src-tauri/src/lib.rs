@@ -29,6 +29,7 @@ mod commands;
 mod constants;
 mod device_info;
 mod discovery;
+mod heartbeat;
 mod http;
 mod image;
 mod mdns;
@@ -36,7 +37,9 @@ mod model;
 mod runtime;
 mod window_geometry;
 
-use commands::{get_monitor_state, set_auto_start, set_device_name, set_grid, set_image_display_mode};
+use commands::{
+    get_monitor_state, set_auto_start, set_device_name, set_grid, set_image_display_mode,
+};
 use runtime::{load_preferences, Runtime};
 use std::fs;
 use tauri::{Manager, WindowEvent};
@@ -68,7 +71,7 @@ pub fn run() {
             let image_dir = cache_dir.join("monitor_images");
             fs::create_dir_all(&image_dir)?; // 确保图片目录存在，后续上传直接写入
             let preferences = load_preferences(&preferences_path); // 加载历史偏好（或生成默认值）
-            // 自启动的真实开关状态以操作系统为准，读取失败时才回退到上次保存的偏好值。
+                                                                   // 自启动的真实开关状态以操作系统为准，读取失败时才回退到上次保存的偏好值。
             let auto_start = app
                 .autolaunch()
                 .is_enabled()
@@ -100,6 +103,7 @@ pub fn run() {
                 });
             }
             let port = http::start_http_server(runtime.clone()); // 启动 HTTP 服务器并拿到实际绑定端口
+            heartbeat::start_cleanup(runtime.clone()); // 定期清理心跳已过期控制端占用的槽位
             discovery::start_udp_discovery(runtime.clone()); // 启动 UDP 探测响应线程
             mdns::start_mdns(&runtime); // 注册 mDNS 服务
             runtime.state.write().expect("state lock poisoned").port = port; // 用真实端口覆盖占位值（start_http_server 内部其实已经写过一次，这里是双保险）

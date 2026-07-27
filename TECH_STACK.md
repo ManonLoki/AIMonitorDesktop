@@ -8,7 +8,7 @@
 | UI 视图 | React 19 + TypeScript | 组件与视图逻辑 |
 | UI 动效 | React Bits + GSAP 3 | 页面入场、滚动呈现与轻量交互反馈；组件源码收敛在项目内 |
 | 前后端通信 | `@tauri-apps/api`（invoke / event） | 前端通过 `invoke` 调用 Rust 命令，通过 `listen("monitor-state-changed", ...)` 订阅状态变化；不经过 HTTP |
-| 局域网 HTTP API | Axum 0.8 + Tokio（`net`/`fs`） + tower-http（CORS） | 面向 Android 端/局域网客户端的 REST API（`/health`、`/api/device`、`/api/config`、`/api/images`、`/api/slots/{slot}`）与 UDP 发现；纯异步实现，不手写线程池或阻塞 socket |
+| 局域网 HTTP API | Axum 0.8 + Tokio（`net`/`fs`） + tower-http（CORS） | 面向局域网客户端的 REST API（含槽位、图片和 `/api/clients/{clientId}/heartbeat`）与 UDP 发现；纯异步请求处理，不手写 socket |
 | 构建 | Vite 8 | 前端开发服务器与生产构建 |
 | 包管理 | pnpm 10 | 使用 `pnpm-lock.yaml` 与精确依赖版本 |
 
@@ -47,13 +47,14 @@ src-tauri/src/
 ├── mdns.rs                   # mDNS 注册（mdns-sd 内部自带常驻线程，是该库自身实现）
 └── http/                     # 基于 Axum 的纯异步 HTTP 服务器
     ├── mod.rs                # build_router + start_http_server（tokio::net::TcpListener + axum::serve）+ 共享 error_json
-    └── {device,images,slots}.rs  # 按资源拆分的处理函数，直接挂在 http/ 下（没有额外的 routes/ 嵌套层）
+    └── {device,images,slots,clients}.rs  # 按资源拆分的处理函数
 ```
 
 ## 约束
 
 1. 前端与后端的数据通路统一走 Tauri `invoke`（写）+ `listen("monitor-state-changed")`（读），不引入 HTTP 客户端做进程内通信。
-2. Rust 侧暴露给局域网的 HTTP API（`/health`、`/api/device`、`/api/config`、`/api/images`、`/api/slots/{slot}`）需与 Android 版保持兼容，改动前核对字段与状态码。
+2. Rust 侧暴露给局域网的 HTTP API 需与 Android 版保持兼容；API v3 的槽位 POST
+   必须携带 `clientId`，每 30 秒续租，2 分钟超时后按 DELETE 语义清理所属槽位。
 3. 优先复用 `src/components/` 下已有组件，避免重复建设。
 4. 动效必须尊重 `prefers-reduced-motion`，避免长时间循环或妨碍操作的过场。
 5. 升级依赖时同时更新精确版本、pnpm 锁文件和本文件中的主版本说明；引入新基础设施前先确认本表是否已有等价方案。

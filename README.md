@@ -2,6 +2,10 @@
 
 AI监控平台桌面版，由 ManonLoki 开发。
 
+局域网 HTTP API 当前为 v3。槽位更新必须携带控制端 `clientId`，并通过
+`POST /api/clients/{clientId}/heartbeat` 每 30 秒续租；连续 2 分钟未续租时，
+桌面端只清理该控制端拥有的宫格。
+
 ## 实机截图
 
 ### 监控界面

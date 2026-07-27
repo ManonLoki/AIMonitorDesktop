@@ -9,4 +9,4 @@ pub(crate) const UDP_DISCOVERY_PORT: u16 = 8_080;
 // 交由 hyper 内部的默认限制处理，不再需要手动实现。
 pub(crate) const MAX_BODY_BYTES: usize = 8 * 1024 * 1024;
 // 对外暴露的 API 版本号，写入 /api/device 与 UDP 探测响应，供客户端做兼容判断。
-pub(crate) const API_VERSION: u8 = 2;
+pub(crate) const API_VERSION: u8 = 3;
