@@ -1,6 +1,8 @@
-// 图片相关的纯逻辑：格式探测、GIF 无限循环修正、上传文件名白名单校验。
-// 不涉及 HTTP/Tauri，只依赖文件系统与字节切片，便于独立单元测试。
-use std::{fs, io::Read, path::Path};
+// 图片相关的逻辑：格式探测、GIF 无限循环修正、上传文件名白名单校验、文件探测。
+// 除 probe_image_file 走 tokio::fs 异步 I/O 外，其余都是不涉及 HTTP/Tauri 的纯函数，
+// 只依赖字节切片，便于独立单元测试。
+use std::path::Path;
+use tokio::io::AsyncReadExt;
 
 // 通过文件头部的魔数判断图片格式，返回 (扩展名, MIME类型)；不依赖文件名/扩展名，
 // 因为上传的文件名是随机生成的 UUID，必须靠内容本身判断类型。
@@ -115,13 +117,13 @@ pub(crate) fn make_gif_loop_forever(bytes: &mut Vec<u8>) -> bool {
 // 避免为了列出图片目录而把每个文件的全部内容读进内存（图片可能有数 MB）。
 // 这是 GET /api/images 分页列表接口的关键优化点：无论请求哪一页，都需要遍历
 // 全部文件以计算 total，如果每个文件都整体读入内存，目录越大、单张图片越大，
-// 这个接口的内存占用和耗时就越不可控。
-pub(crate) fn probe_image_file(path: &Path) -> Option<(&'static str, u64)> {
-    let mut file = fs::File::open(path).ok()?; // 打开文件，失败则整体返回 None
+// 这个接口的内存占用和耗时就越不可控。走 tokio::fs 异步 I/O，不阻塞 Tokio 工作线程。
+pub(crate) async fn probe_image_file(path: &Path) -> Option<(&'static str, u64)> {
+    let mut file = tokio::fs::File::open(path).await.ok()?; // 打开文件，失败则整体返回 None
     let mut header = [0u8; 8]; // 8 字节足够覆盖 PNG/JPEG/GIF 的魔数
-    let read = file.read(&mut header).ok()?; // 读取实际字节数（文件可能不足 8 字节）
+    let read = file.read(&mut header).await.ok()?; // 读取实际字节数（文件可能不足 8 字节）
     let (_, mime) = detect_image(&header[..read])?; // 只用魔数判断类型，丢弃扩展名
-    let size = file.metadata().ok()?.len(); // 走文件系统元数据拿总大小，不读正文
+    let size = file.metadata().await.ok()?.len(); // 走文件系统元数据拿总大小，不读正文
     Some((mime, size))
 }
 

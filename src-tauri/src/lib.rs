@@ -10,16 +10,19 @@
 // - runtime.rs           Runtime 共享状态、快照/落盘/广播事件、偏好加载
 // - commands.rs          5 个 #[tauri::command]，前端唯一的写入入口
 // - device_info.rs       默认设备名、局域网 IP 探测
-// - image.rs              图片格式探测、GIF 循环修正、文件名校验
+// - image.rs              图片格式探测、GIF 循环修正、文件名校验、异步文件探测
 // - window_geometry.rs    窗口几何的可用性判断、恢复与保存
-// - discovery.rs          UDP 主动发现
+// - discovery.rs          UDP 主动发现（纯异步）
 // - mdns.rs                mDNS 服务注册
-// - http/                 手写 HTTP 服务器：protocol（解析/响应）+ routes（按资源分发）
+// - http/                 基于 Axum 的纯异步 HTTP 服务器：路由挂载 + routes（按资源分发）
 //
 // 三个并发子系统（在 setup 回调里一起启动，共享同一个 Arc<Runtime>）：
-// 1. HTTP 服务器：手写的 TcpListener + 线程池，提供与 Android 版兼容的 REST API；
-// 2. UDP 广播发现：监听 8080 端口，响应局域网内的探测广播；
-// 3. mDNS：注册 `_aimonitor._tcp.` 服务，支持 Bonjour/Avahi 风格的服务发现。
+// 1. HTTP 服务器：Axum + Tokio 纯异步实现，提供与 Android 版兼容的 REST API；
+//    没有手写的线程池或阻塞 socket，每个连接由 Tokio 调度到独立的异步任务。
+// 2. UDP 广播发现：tokio::net::UdpSocket 异步监听 8080 端口，响应局域网内的探测广播。
+// 3. mDNS：注册 `_aimonitor._tcp.` 服务，支持 Bonjour/Avahi 风格的服务发现
+//    （`mdns-sd` 内部自带一个常驻线程，这是该第三方库自身的实现方式，不在本项目
+//    "网络层纯异步" 的范围内——我们只负责调用它注册一次）。
 mod commands;
 mod constants;
 mod device_info;

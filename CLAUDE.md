@@ -46,23 +46,24 @@ src-tauri/src/
 ├── runtime.rs             # Runtime struct + SharedRuntime, snapshot/save_preferences/changed, load_preferences
 ├── commands.rs            # the 5 #[tauri::command] functions — the frontend's only write path
 ├── device_info.rs         # default_device_name, local_ipv4
-├── image.rs                # detect_image, make_gif_loop_forever, probe_image_file, safe_image_filename (+ tests)
+├── image.rs                # detect_image, make_gif_loop_forever, safe_image_filename (sync) + probe_image_file (async, tokio::fs) + tests
 ├── window_geometry.rs      # rectangles_have_visible_overlap, restore/save window geometry (+ tests)
-├── discovery.rs            # UDP broadcast discovery (start_udp_discovery)
+├── discovery.rs            # UDP broadcast discovery, tokio::net::UdpSocket, pure async
 ├── mdns.rs                  # mDNS service registration (start_mdns)
 └── http/
-    ├── mod.rs                # start_http_server: TcpListener + 4-thread worker pool, no web framework
-    ├── protocol.rs           # Request parsing, response writing, multipart/query-string helpers
+    ├── mod.rs                # build_router + start_http_server: tokio::net::TcpListener + axum::serve, no manual thread pool
     └── routes/
-        ├── mod.rs             # handle_client: method+path dispatch across the resource modules below
+        ├── mod.rs             # re-exports the three resource modules below for mounting in build_router
         ├── device.rs          # /health, /api/config, /api/device
         ├── images.rs          # /api/images (list/upload), /api/images/{filename} (get/delete)
         └── slots.rs           # /api/slots/{1..25} (update/clear a tile)
 ```
 
-1. **The hand-rolled HTTP server** (`http/`) serves the Android-compatible REST API: `/health`, `/api/device`, `/api/config`, `/api/images` (GET list/POST upload), `/api/images/{filename}` (GET/DELETE), `/api/slots/{1..25}` (POST update tile / DELETE clear tile). Port auto-selects upward from `10241`. This API's shape is dictated by the Android app — don't change request/response fields without checking Android-side compatibility. `GET /api/images` (`http/routes/images.rs`) uses `probe_image_file` (`image.rs`) to sniff each file's magic bytes and stat its size instead of reading the whole file into memory — keep that pattern if you touch the listing path, since the image directory can hold multi-MB GIFs. Each `http/routes/*.rs` handler function returns `bool` (handled vs. not-matched) so `routes/mod.rs` can fall through to the next resource module, then to a final generic 404.
-2. **UDP discovery** (`discovery.rs::start_udp_discovery`) — listens on `8080`, replies to a literal `AIMONITOR_DISCOVER_V1` broadcast with device JSON.
-3. **mDNS** (`mdns.rs::start_mdns`) — registers `_aimonitor._tcp.local.` via `mdns-sd`.
+1. **The HTTP server** (`http/`) is an Axum app running on Tauri's own Tokio runtime — no manual `TcpListener` parsing or thread pool. `http::start_http_server` finds the first available port from `10241` upward with an async bind loop (via `tauri::async_runtime::block_on`, since Tauri's `setup()` callback is itself synchronous), then hands the listener to `axum::serve(...)` spawned as a background task (`tauri::async_runtime::spawn`) — every connection after that is scheduled onto Tokio, not a hand-rolled worker thread. It serves the Android-compatible REST API: `/health`, `/api/device`, `/api/config`, `/api/images` (GET list/POST upload), `/api/images/{filename}` (GET/DELETE), `/api/slots/{1..25}` (POST update tile / DELETE clear tile). This API's shape is dictated by the Android app — don't change request/response fields or status codes without checking Android-side compatibility; handlers build `{"error": "..."}` JSON responses manually (not Axum's default rejection bodies) specifically to preserve that contract. `GET /api/images` (`http/routes/images.rs`) uses `probe_image_file` (`image.rs`, now `async fn` over `tokio::fs`) to sniff each file's magic bytes and stat its size instead of reading the whole file into memory — keep that pattern if you touch the listing path, since the image directory can hold multi-MB GIFs. Request body size is capped via `DefaultBodyLimit` (`constants::MAX_BODY_BYTES`); CORS is a permissive `tower_http::cors::CorsLayer` handling `OPTIONS` automatically.
+2. **UDP discovery** (`discovery.rs::start_udp_discovery`) — a `tokio::net::UdpSocket` task (also via `tauri::async_runtime::spawn`) listening on `8080`, replies to a literal `AIMONITOR_DISCOVER_V1` broadcast with device JSON. No blocking socket or dedicated `std::thread`.
+3. **mDNS** (`mdns.rs::start_mdns`) — registers `_aimonitor._tcp.local.` via `mdns-sd`. This crate manages its own internal thread for the service daemon; that's the third-party library's implementation detail, not something this codebase hand-rolls, so it's out of scope for the "network layer is pure async" rule below.
+
+The HTTP/UDP network layer is pure async by design (Tokio + Axum, no manual threads or blocking sockets) — this is a deliberate architectural choice, not just an implementation detail, so keep new endpoints and socket code on this model rather than reintroducing blocking I/O or manual thread spawning.
 
 Tauri commands (`get_monitor_state`, `set_grid`, `set_image_display_mode`, `set_device_name`, `set_auto_start`, all in `commands.rs`) are the only way the frontend mutates state; every mutation calls `runtime.save_preferences()` (writes `preferences.json` in the app config dir) and `runtime.changed()` (emits a `monitor-state-changed` Tauri event). Window geometry is persisted on move/resize/close and validated against currently attached monitors on restore (`window_geometry::rectangles_have_visible_overlap` — this is what two of the Rust unit tests cover).
 

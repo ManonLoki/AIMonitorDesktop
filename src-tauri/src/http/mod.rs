@@ -1,30 +1,68 @@
-// 手写的最小 HTTP/1.1 服务器：接收线程只负责 accept 并分发到工作线程池，
-// 具体的请求解析/响应写出在 protocol 子模块，路由分发在 routes 子模块。
-mod protocol;
+// 基于 Axum 的纯异步 HTTP 服务器：路由挂载、CORS、端口自动选择、后台任务派生。
+// 不再有手写的 TcpListener 解析或线程池——每个连接由 Tokio 调度到独立的异步任务，
+// 具体的资源处理函数在 routes 子模块，按 method + path 拆分到各自的文件。
 mod routes;
 
-use crate::constants::FIRST_HTTP_PORT;
+use crate::constants::{FIRST_HTTP_PORT, MAX_BODY_BYTES};
 use crate::runtime::SharedRuntime;
-use protocol::respond_json;
-use routes::handle_client;
-use serde_json::json;
-use std::{
-    net::{Ipv4Addr, TcpListener, TcpStream},
-    sync::{mpsc, Arc, Mutex},
-    thread,
+use axum::{
+    extract::DefaultBodyLimit,
+    http::{Method, StatusCode},
+    response::IntoResponse,
+    routing::{get, post},
+    Json, Router,
 };
+use serde_json::json;
+use std::net::Ipv4Addr;
+use tokio::net::TcpListener;
+use tower_http::cors::{Any, CorsLayer};
 
-// 启动 HTTP 服务器：从 FIRST_HTTP_PORT 起向上找第一个可绑定的端口，
-// 用一个有界 mpsc 队列 + 4 个常驻工作线程处理连接，接收线程本身只管 accept，
-// 不在 accept 循环里做任何耗时逻辑，避免拖慢新连接的接纳速度。
+// 组装所有路由；.with_state(runtime) 之后，每个 handler 都能通过 State 提取器
+// 拿到同一份 Arc<Runtime>，等价于原来手写实现里到处传递的 &SharedRuntime。
+fn build_router(runtime: SharedRuntime) -> Router {
+    Router::new()
+        .route("/health", get(routes::device::health))
+        .route("/api/config", get(routes::device::get_config))
+        .route("/api/device", get(routes::device::get_device))
+        .route(
+            "/api/images",
+            get(routes::images::list_images).post(routes::images::upload_image),
+        )
+        .route(
+            "/api/images/{filename}",
+            get(routes::images::get_image).delete(routes::images::delete_image),
+        )
+        .route(
+            "/api/slots/{slot}",
+            post(routes::slots::update_slot).delete(routes::slots::clear_slot),
+        )
+        .fallback(not_found)
+        .layer(
+            // 局域网内任意来源、任意来源头都放行，与原实现里手写的宽松 CORS 头等价；
+            // OPTIONS 预检请求由本层自动应答，不再需要手动特判。
+            CorsLayer::new()
+                .allow_origin(Any)
+                .allow_methods([Method::GET, Method::POST, Method::DELETE, Method::OPTIONS])
+                .allow_headers(Any),
+        )
+        // 单次请求体上限，超出直接拒绝，避免恶意/异常请求占满内存（图片上传走这里）。
+        .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
+        .with_state(runtime)
+}
+
+// 兜底 404：未匹配任何注册路由时返回，错误结构与手写实现时期保持一致。
+async fn not_found() -> impl IntoResponse {
+    (StatusCode::NOT_FOUND, Json(json!({ "error": "not found" })))
+}
+
+// 启动 HTTP 服务器：先同步阻塞查找从 FIRST_HTTP_PORT 起第一个可绑定端口
+//（用 tauri::async_runtime::block_on 借用 Tauri 已经建好的 Tokio 运行时，
+// 与旧版"循环 bind 直到成功"的观测行为一致，只是底层换成了异步 API），
+// 随后把 accept 循环交给 axum::serve 在后台任务中运行，函数本身仍同步返回端口号，
+// 供 Tauri 的 setup() 回调（本身是同步闭包）继续往下走。
 pub(crate) fn start_http_server(runtime: SharedRuntime) -> u16 {
-    let (port, listener) = (FIRST_HTTP_PORT..=u16::MAX)
-        .find_map(|port| {
-            TcpListener::bind((Ipv4Addr::UNSPECIFIED, port)) // 依次尝试绑定端口，监听所有网卡
-                .ok()
-                .map(|listener| (port, listener))
-        })
-        .expect("没有可用的 HTTP 端口"); // 极端情况下所有端口都被占用，直接 panic 终止启动
+    let listener = tauri::async_runtime::block_on(bind_first_available_port());
+    let port = listener.local_addr().expect("HTTP 监听地址不可用").port();
     {
         let mut state = runtime.state.write().expect("state lock poisoned"); // 加写锁回填真实监听端口与运行状态
         state.port = port;
@@ -32,38 +70,24 @@ pub(crate) fn start_http_server(runtime: SharedRuntime) -> u16 {
     }
     runtime.changed(); // 通知前端端口/运行状态已确定
 
-    // 队列容量 16：突发连接超过这个数量时，多余的连接会被直接告知"服务器繁忙"，
-    // 而不是无限堆积导致内存增长或让客户端无限期挂起。
-    let (sender, receiver) = mpsc::sync_channel::<TcpStream>(16); // 有界同步队列，容量 16
-    let receiver = Arc::new(Mutex::new(receiver)); // 多个工作线程共享同一个接收端，需要用 Mutex 互斥取任务
-    for _ in 0..4 {
-        let worker_runtime = runtime.clone(); // 每个工作线程持有自己的 Arc 克隆
-        let worker_receiver = receiver.clone();
-        thread::spawn(move || loop {
-            let stream = worker_receiver.lock().expect("HTTP queue poisoned").recv(); // 阻塞等待下一个待处理连接
-            match stream {
-                Ok(stream) => handle_client(stream, &worker_runtime), // 取到连接，同步处理完整个请求
-                Err(_) => break, // 发送端已全部丢弃（服务关闭），退出工作线程
-            }
-        });
-    }
-    thread::spawn(move || {
-        for mut stream in listener.incoming().flatten() {
-            // accept 循环：只做分发，不做任何耗时逻辑
-            if let Err(error) = sender.try_send(stream) {
-                // 队列已满或已断开：尽力返回 503 而不是直接丢弃连接。
-                stream = match error {
-                    mpsc::TrySendError::Full(stream) | mpsc::TrySendError::Disconnected(stream) => {
-                        stream // 两种错误都能拿回原始连接对象，用于返回错误响应
-                    }
-                };
-                respond_json(
-                    &mut stream,
-                    503,
-                    json!({ "error": "server busy; retry later" }),
-                );
-            }
+    let app = build_router(runtime);
+    tauri::async_runtime::spawn(async move {
+        // axum::serve 对每个连接内部派生独立的 Tokio 任务处理，单个连接出错
+        // （例如客户端异常断开）不会影响其他连接；这里只在 serve 本身退出时记录，
+        // 正常情况下它会随应用生命周期一直运行，不会主动返回。
+        if let Err(error) = axum::serve(listener, app).await {
+            eprintln!("HTTP 服务器异常退出: {error}");
         }
     });
     port // 返回实际绑定成功的端口号，供 setup 回调回填状态
+}
+
+// 从 FIRST_HTTP_PORT 开始向上异步尝试绑定，返回第一个绑定成功的监听器。
+async fn bind_first_available_port() -> TcpListener {
+    for port in FIRST_HTTP_PORT..=u16::MAX {
+        if let Ok(listener) = TcpListener::bind((Ipv4Addr::UNSPECIFIED, port)).await {
+            return listener;
+        }
+    }
+    panic!("没有可用的 HTTP 端口"); // 极端情况下所有端口都被占用，直接 panic 终止启动
 }
