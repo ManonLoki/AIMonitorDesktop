@@ -6,14 +6,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 AIMonitorDesktop — a Tauri 2 desktop app (Windows/macOS) that is a 1:1 port of an existing Android app (`/Users/manonloki/Documents/my-work/ai/AiMonitorAndroid`). It shows a 1–5×1–5 grid of tiles (AI name, username, image, content, updated time) and exposes an HTTP API + mDNS/UDP discovery so the Android app (or anything else on the LAN) can push tile updates to it. Product requirements are in `PRODUCT_REQUIREMENTS.md`; hard requirements worth remembering: no dashboard/decoration UI beyond the monitor canvas, and the window maximizes on launch.
 
+## Code gate: 400-line file limit
+
+**This is the enforced, canonical standard for this repo — every source file (`.ts`/`.tsx`/`.rs`) must stay at or under 400 lines.** When a file would grow past that, split it into modules/files along responsibility boundaries instead of letting it grow — see the backend module layout below for the reference example of how this repo does that split. `scripts/check-file-length.mjs` scans `src/` and `src-tauri/src/` (skipping `node_modules`, `target`, `dist`, `gen`) and fails the build if any file exceeds the limit; it's wired into `pnpm run check`, so it runs on every type-check and before every release build. Run it standalone with `pnpm run check:filesize`. Don't raise the limit or exclude a file from the scan to make a change fit — split the file instead.
+
 ## Commands
 
 ```bash
 pnpm install
-pnpm run dev          # vite dev server only
-pnpm run tauri dev    # full desktop app with hot reload
-pnpm run check        # tsc --build (type-check, no emit) — run before any release build
-pnpm run build        # tsc --build && vite build (frontend only)
+pnpm run dev              # vite dev server only
+pnpm run tauri dev        # full desktop app with hot reload
+pnpm run check            # tsc --build (type-check, no emit) + the 400-line file gate — run before any release build
+pnpm run check:filesize   # just the 400-line file gate, standalone
+pnpm run build            # tsc --build && vite build (frontend only)
 ```
 
 Release builds (macOS host required for both):
@@ -24,19 +29,42 @@ pnpm run build:win      # cross-compiles Windows x64 NSIS installer via cargo-xw
 pnpm run build:release  # both, sequentially
 ```
 
-`scripts/build-release.mjs` only wipes/repopulates `publish/` after every requested platform build succeeds; it never copies partial artifacts. Windows cross-build needs `cargo-xwin`, NSIS (`makensis`), and LLVM (`llvm-rc` on `PATH`) — `brew install llvm nsis && cargo install --locked cargo-xwin && rustup target add x86_64-pc-windows-msvc`. There is no separate frontend test suite or linter configured — `pnpm run check` is the only automated verification step. Rust unit tests live inline in `src-tauri/src/lib.rs` (`#[cfg(test)] mod tests`) and run with `cargo test` from `src-tauri/`.
+`scripts/build-release.mjs` only wipes/repopulates `publish/` after every requested platform build succeeds; it never copies partial artifacts. Windows cross-build needs `cargo-xwin`, NSIS (`makensis`), and LLVM (`llvm-rc` on `PATH`) — `brew install llvm nsis && cargo install --locked cargo-xwin && rustup target add x86_64-pc-windows-msvc`. There is no separate frontend test suite or linter configured — `pnpm run check` is the only automated verification step. Rust unit tests live inline next to the code they cover (`#[cfg(test)] mod tests` in `image.rs` and `window_geometry.rs`) and run with `cargo test` from `src-tauri/`.
 
 Full release rules (canonical naming, source-to-output map, prerequisite troubleshooting) are in `.agents/skills/build-aimonitor-desktop/` — read `references/release-contract.md` before touching build config or diagnosing a packaging failure. Key invariant: the product/binary/bundle/installer name must stay `AIMonitorDesktop` everywhere; don't touch `bundle.targets`, `mainBinaryName`, or swap NSIS/DMG for WiX/MSI.
 
 ## Architecture
 
-**The backend is the source of truth, and it lives entirely in one file: `src-tauri/src/lib.rs`.** There is no separate backend crate or module split — a single `Runtime` struct (rows/columns, tiles, device identity, window geometry, image dir) is held behind `Arc<RwLock<...>>` and shared between three concurrent subsystems started in `run()`:
+**The backend is the source of truth.** It's a single Cargo crate (`src-tauri/src/`) split into modules by responsibility — no file crosses the 400-line gate above. A single `Runtime` struct (rows/columns, tiles, device identity, window geometry, image dir) is held behind `Arc<RwLock<...>>` (the `SharedRuntime` alias) and shared between three concurrent subsystems started from `lib.rs::run()`:
 
-1. **A hand-rolled HTTP server** (`start_http_server`, plain `std::net::TcpListener` + a 4-thread worker pool — no web framework) serving the Android-compatible REST API: `/health`, `/api/device`, `/api/config`, `/api/images` (GET list/POST upload), `/api/images/{filename}` (GET/DELETE), `/api/slots/{1..25}` (POST update tile / DELETE clear tile). Port auto-selects upward from `10241`. This API's shape is dictated by the Android app — don't change request/response fields without checking Android-side compatibility. `GET /api/images` uses `probe_image_file` to sniff each file's magic bytes and stat its size instead of reading the whole file into memory — keep that pattern if you touch the listing path, since the image directory can hold multi-MB GIFs.
-2. **UDP discovery** (`start_udp_discovery`) — listens on `8080`, replies to a literal `AIMONITOR_DISCOVER_V1` broadcast with device JSON.
-3. **mDNS** (`start_mdns`) — registers `_aimonitor._tcp.local.` via `mdns-sd`.
+```text
+src-tauri/src/
+├── main.rs              # binary entry point, forwards to lib::run()
+├── lib.rs                # Tauri entry: module wiring, setup() assembly, invoke_handler list
+├── constants.rs          # shared constants: ports, size limits, API_VERSION
+├── model.rs               # MonitorTile / MonitorState / WindowGeometry / Preferences (serde structs)
+├── runtime.rs             # Runtime struct + SharedRuntime, snapshot/save_preferences/changed, load_preferences
+├── commands.rs            # the 5 #[tauri::command] functions — the frontend's only write path
+├── device_info.rs         # default_device_name, local_ipv4
+├── image.rs                # detect_image, make_gif_loop_forever, probe_image_file, safe_image_filename (+ tests)
+├── window_geometry.rs      # rectangles_have_visible_overlap, restore/save window geometry (+ tests)
+├── discovery.rs            # UDP broadcast discovery (start_udp_discovery)
+├── mdns.rs                  # mDNS service registration (start_mdns)
+└── http/
+    ├── mod.rs                # start_http_server: TcpListener + 4-thread worker pool, no web framework
+    ├── protocol.rs           # Request parsing, response writing, multipart/query-string helpers
+    └── routes/
+        ├── mod.rs             # handle_client: method+path dispatch across the resource modules below
+        ├── device.rs          # /health, /api/config, /api/device
+        ├── images.rs          # /api/images (list/upload), /api/images/{filename} (get/delete)
+        └── slots.rs           # /api/slots/{1..25} (update/clear a tile)
+```
 
-Tauri commands (`get_monitor_state`, `set_grid`, `set_image_display_mode`, `set_device_name`, `set_auto_start`) are the only way the frontend mutates state; every mutation calls `runtime.save_preferences()` (writes `preferences.json` in the app config dir) and `runtime.changed()` (emits a `monitor-state-changed` Tauri event). Window geometry is persisted on move/resize/close and validated against currently attached monitors on restore (`rectangles_have_visible_overlap` — this is what the two Rust unit tests cover).
+1. **The hand-rolled HTTP server** (`http/`) serves the Android-compatible REST API: `/health`, `/api/device`, `/api/config`, `/api/images` (GET list/POST upload), `/api/images/{filename}` (GET/DELETE), `/api/slots/{1..25}` (POST update tile / DELETE clear tile). Port auto-selects upward from `10241`. This API's shape is dictated by the Android app — don't change request/response fields without checking Android-side compatibility. `GET /api/images` (`http/routes/images.rs`) uses `probe_image_file` (`image.rs`) to sniff each file's magic bytes and stat its size instead of reading the whole file into memory — keep that pattern if you touch the listing path, since the image directory can hold multi-MB GIFs. Each `http/routes/*.rs` handler function returns `bool` (handled vs. not-matched) so `routes/mod.rs` can fall through to the next resource module, then to a final generic 404.
+2. **UDP discovery** (`discovery.rs::start_udp_discovery`) — listens on `8080`, replies to a literal `AIMONITOR_DISCOVER_V1` broadcast with device JSON.
+3. **mDNS** (`mdns.rs::start_mdns`) — registers `_aimonitor._tcp.local.` via `mdns-sd`.
+
+Tauri commands (`get_monitor_state`, `set_grid`, `set_image_display_mode`, `set_device_name`, `set_auto_start`, all in `commands.rs`) are the only way the frontend mutates state; every mutation calls `runtime.save_preferences()` (writes `preferences.json` in the app config dir) and `runtime.changed()` (emits a `monitor-state-changed` Tauri event). Window geometry is persisted on move/resize/close and validated against currently attached monitors on restore (`window_geometry::rectangles_have_visible_overlap` — this is what two of the Rust unit tests cover).
 
 **The frontend has no router, server-state library, or global client-state store — it doesn't need one.** The whole app is one Rust-driven data source fanned out to a few components:
 
@@ -64,3 +92,4 @@ Mantine, TanStack Router/Query, Axios, and Jotai were present in `package.json` 
 
 - Dependencies use exact/pinned versions (`package.json` has no `^`/`~`; `Cargo.toml` pins with `=`) and the lockfiles are committed — don't loosen version specifiers.
 - All user-facing strings are Simplified Chinese, matching the Android app.
+- No source file exceeds 400 lines — see "Code gate: 400-line file limit" above. This is enforced by `pnpm run check`, not just a style preference.

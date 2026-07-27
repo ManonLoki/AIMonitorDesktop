@@ -9,15 +9,17 @@ import { useMonitorState } from "./hooks/useMonitorState";
 // 全部状态来自 useMonitorState（订阅 Rust 后端），不再引入路由库——
 // 页面切换只是一个本地 UI 状态，没有可分享的 URL 语义。
 export function MonitorApp() {
-  const { state, refresh } = useMonitorState();
-  const [destination, setDestination] = useState<"monitor" | "settings">("monitor");
-  const [sidebarExpanded, setSidebarExpanded] = useState(false);
-  const statusText = `版本 ${state.appVersion}`;
+  const { state, refresh } = useMonitorState(); // 唯一的数据来源：Rust 后端状态 + 手动刷新方法
+  const [destination, setDestination] = useState<"monitor" | "settings">("monitor"); // 当前展示的工作区页面
+  const [sidebarExpanded, setSidebarExpanded] = useState(false); // 侧边栏是否展开（默认折叠，仅显示图标）
+  const statusText = `版本 ${state.appVersion}`; // 侧边栏品牌区展示的版本号文案
 
   return (
     <div className="app-shell">
+      {/* 侧边栏，class 里叠加 expanded/collapsed 控制展开/折叠样式 */}
       <aside className={`sidebar${sidebarExpanded ? " expanded" : " collapsed"}`}>
         <div className="brand">
+          {/* 应用 Logo 与名称 */}
           <img src="/branding/aimonitor-logo.png" alt="AIMonitorDesktop" />
           <div className="brand-copy">
             <strong>AIMonitorDesktop</strong>
@@ -27,14 +29,15 @@ export function MonitorApp() {
         <button
           type="button"
           className="sidebar-toggle"
-          aria-label={sidebarExpanded ? "收起侧边栏" : "展开侧边栏"}
+          aria-label={sidebarExpanded ? "收起侧边栏" : "展开侧边栏"} // 无障碍标签随展开状态变化
           aria-expanded={sidebarExpanded}
           title={sidebarExpanded ? "收起侧边栏" : "展开侧边栏"}
-          onClick={() => setSidebarExpanded((expanded) => !expanded)}
+          onClick={() => setSidebarExpanded((expanded) => !expanded)} // 点击切换展开/折叠
         >
           <Icon name="sidebar" />
         </button>
         <nav aria-label="主导航">
+          {/* “监控”导航项：点击切换到监控画布页 */}
           <button
             title="监控"
             className={destination === "monitor" ? "active" : ""}
@@ -43,6 +46,7 @@ export function MonitorApp() {
             <Icon name="monitor" />
             <span>监控</span>
           </button>
+          {/* “设置”导航项：点击切换到设置页 */}
           <button
             title="设置"
             className={destination === "settings" ? "active" : ""}
@@ -53,6 +57,7 @@ export function MonitorApp() {
           </button>
         </nav>
         <div className="server-indicator">
+          {/* HTTP 服务是否已完成绑定，绿点/文案随之切换 */}
           <i className={state.isServerRunning ? "online" : ""} />
           <span>{state.isServerRunning ? "服务运行中" : "服务启动中"}</span>
         </div>
@@ -61,14 +66,14 @@ export function MonitorApp() {
         {/* key={destination} 让切换目的地时强制重新挂载，从而重播入场动画 */}
         <AnimatedContent
           className="page-motion"
-          distance={destination === "monitor" ? -14 : 14}
+          distance={destination === "monitor" ? -14 : 14} // 两个页面从相反方向滑入，增强切换方向感
           duration={0.42}
           key={destination}
         >
           {destination === "monitor" ? (
-            <MonitorCanvas state={state} />
+            <MonitorCanvas state={state} /> // 监控画布：渲染宫格
           ) : (
-            <SettingsPanel state={state} onRefresh={refresh} />
+            <SettingsPanel state={state} onRefresh={refresh} /> // 设置页：修改配置后调用 refresh 拉取最新状态
           )}
         </AnimatedContent>
       </div>

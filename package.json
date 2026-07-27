@@ -16,7 +16,8 @@
     "build:mac": "node scripts/build-release.mjs mac",
     "build:win": "node scripts/build-release.mjs win",
     "build:release": "node scripts/build-release.mjs all",
-    "check": "tsc --build",
+    "check": "tsc --build && node scripts/check-file-length.mjs",
+    "check:filesize": "node scripts/check-file-length.mjs",
     "preview": "vite preview",
     "tauri": "tauri"
   },

@@ -32,10 +32,11 @@ function ChoiceRow({
         <small>可选 1–5</small>
       </div>
       <div className="number-choices">
+        {/* 固定渲染 1-5 五个按钮，当前值对应的按钮加 selected 样式 */}
         {[1, 2, 3, 4, 5].map((option) => (
           <button
             className={option === value ? "selected" : ""}
-            onClick={() => onChange(option)}
+            onClick={() => onChange(option)} // 点击即回调父组件发起后端更新
             key={option}
           >
             {option}
@@ -58,30 +59,33 @@ export function SettingsPanel({
 }) {
   // 设备名称使用本地受控输入，允许用户编辑到未保存状态，
   // 仅在后端状态变化时（例如首次加载）用后端值覆盖本地草稿。
-  const [deviceName, setDeviceName] = useState(state.deviceName);
-  useEffect(() => setDeviceName(state.deviceName), [state.deviceName]);
+  const [deviceName, setDeviceName] = useState(state.deviceName); // 本地输入框草稿值
+  useEffect(() => setDeviceName(state.deviceName), [state.deviceName]); // 后端设备名变化时同步覆盖草稿
 
+  // 统一的“调命令 + 刷新状态”封装，避免每个设置项都重复写这两步
   const call = async (command: string, args: Record<string, unknown>) => {
-    await invoke(command, args);
-    await onRefresh();
+    await invoke(command, args); // 调用 Rust 侧 Tauri 命令并等待完成
+    await onRefresh(); // 命令成功后立即拉取最新状态
   };
 
-  const address = state.localIp;
+  const address = state.localIp; // 局域网 IP，下方多处 URL 展示都会用到
 
   return (
     <main className="settings-page" id="settings-scroll-container">
       <div className="settings-content">
+        {/* 版本信息卡片 */}
         <AnimatedContent container="#settings-scroll-container" delay={0.04} distance={16}>
           <SpotlightCard className="version-card">
             <SettingRow label="当前 APP 版本" value={state.appVersion} />
           </SpotlightCard>
         </AnimatedContent>
 
+        {/* 系统设置：开机自启开关 */}
         <AnimatedContent container="#settings-scroll-container" delay={0.08} distance={20}>
           <h2>系统</h2>
           <SpotlightCard
             className="settings-card toggle-row"
-            onClick={() => void call("set_auto_start", { enabled: !state.autoStart })}
+            onClick={() => void call("set_auto_start", { enabled: !state.autoStart })} // 点击整行即可切换开关状态（取反当前值）
           >
             <div>
               <strong>开机自启</strong>
@@ -93,6 +97,7 @@ export function SettingsPanel({
           </SpotlightCard>
         </AnimatedContent>
 
+        {/* 网络服务：服务状态、设备名称编辑、连接信息展示 */}
         <AnimatedContent container="#settings-scroll-container" delay={0.12} distance={22}>
           <h2>网络服务</h2>
           <SpotlightCard className="settings-card network-card">
@@ -110,16 +115,16 @@ export function SettingsPanel({
               <span>设备名称</span>
               <input
                 value={deviceName}
-                maxLength={40}
-                onChange={(event) => setDeviceName(event.target.value)}
+                maxLength={40} // 与后端 set_device_name 中的截断长度保持一致
+                onChange={(event) => setDeviceName(event.target.value)} // 仅更新本地草稿，不立即提交
               />
               <small>发现设备后显示的名称</small>
             </label>
             <div className="save-row">
               <button
                 className="primary-button"
-                disabled={!deviceName.trim() || deviceName.trim() === state.deviceName}
-                onClick={() => void call("set_device_name", { name: deviceName })}
+                disabled={!deviceName.trim() || deviceName.trim() === state.deviceName} // 空白或未修改时禁用保存按钮
+                onClick={() => void call("set_device_name", { name: deviceName })} // 提交草稿到后端
               >
                 保存名称
               </button>
@@ -134,18 +139,19 @@ export function SettingsPanel({
           </SpotlightCard>
         </AnimatedContent>
 
+        {/* 监控宫格设置：行列数、图片显示模式 */}
         <AnimatedContent container="#settings-scroll-container" delay={0.08} distance={22}>
           <h2>监控宫格</h2>
           <SpotlightCard className="settings-card grid-card">
             <ChoiceRow
               label="行数"
               value={state.rows}
-              onChange={(rows) => void call("set_grid", { rows, columns: state.columns })}
+              onChange={(rows) => void call("set_grid", { rows, columns: state.columns })} // 只改行数，列数沿用当前值
             />
             <ChoiceRow
               label="列数"
               value={state.columns}
-              onChange={(columns) => void call("set_grid", { rows: state.rows, columns })}
+              onChange={(columns) => void call("set_grid", { rows: state.rows, columns })} // 只改列数，行数沿用当前值
             />
             <div className="divider" />
             <div className="display-mode">

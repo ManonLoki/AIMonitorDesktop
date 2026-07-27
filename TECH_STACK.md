@@ -11,7 +11,11 @@
 | 构建 | Vite 8 | 前端开发服务器与生产构建 |
 | 包管理 | pnpm 10 | 使用 `pnpm-lock.yaml` 与精确依赖版本 |
 
-页面内没有独立的服务端状态管理、路由或客户端全局状态库：整个应用只有"监控画布"与"设置"两个本地 UI 切换态，全部数据来自 Rust 侧的单一 `Runtime`（见 `src-tauri/src/lib.rs`），通过 `useMonitorState`（`src/hooks/useMonitorState.ts`）拉取与订阅。此前预留的 Mantine、TanStack Router/Query、Axios、Jotai 均未被实际使用，已从依赖中移除；如未来需要更复杂的路由/服务端状态/表单能力，再按需引入并回填这张表。
+页面内没有独立的服务端状态管理、路由或客户端全局状态库：整个应用只有"监控画布"与"设置"两个本地 UI 切换态，全部数据来自 Rust 侧的单一 `Runtime`（见 `src-tauri/src/runtime.rs`），通过 `useMonitorState`（`src/hooks/useMonitorState.ts`）拉取与订阅。此前预留的 Mantine、TanStack Router/Query、Axios、Jotai 均未被实际使用，已从依赖中移除；如未来需要更复杂的路由/服务端状态/表单能力，再按需引入并回填这张表。
+
+## 代码门禁：单文件不超过 400 行
+
+这是本仓库记录在 `CLAUDE.md`（"Code gate: 400-line file limit" 一节）里的事实标准，前后端一并适用：任何 `.ts`/`.tsx`/`.rs` 源码文件都不允许超过 400 行，超出就按职责拆分为更小的模块/文件。`scripts/check-file-length.mjs` 扫描 `src/` 与 `src-tauri/src/` 并接入 `pnpm run check`，超限会直接使命令失败。新增代码前先看是否已有文件快要触顶，需要的话提前拆分，而不是等门禁报错再拆。
 
 ## 目录约定
 
@@ -31,7 +35,19 @@ src/
 └── styles.css
 ```
 
-后端只有一个文件 `src-tauri/src/lib.rs`：状态管理、手写 HTTP 服务器（Android 兼容 API）、UDP 发现、mDNS 注册都在其中，共享同一个 `Arc<Runtime>`。
+后端 `src-tauri/src/` 按职责拆成多个模块（详见 `CLAUDE.md` 的 Architecture 一节），核心是共享同一个 `Arc<Runtime>` 的三个子系统：
+
+```text
+src-tauri/src/
+├── main.rs / lib.rs        # 可执行文件入口 / Tauri 装配与启动
+├── constants.rs, model.rs, runtime.rs, commands.rs
+├── device_info.rs, image.rs, window_geometry.rs
+├── discovery.rs             # UDP 发现
+├── mdns.rs                   # mDNS 注册
+└── http/                     # 手写 HTTP 服务器：protocol（解析/响应）+ routes（按资源分发）
+    ├── mod.rs, protocol.rs
+    └── routes/{mod,device,images,slots}.rs
+```
 
 ## 约束
 
@@ -40,3 +56,4 @@ src/
 3. 优先复用 `src/components/` 下已有组件，避免重复建设。
 4. 动效必须尊重 `prefers-reduced-motion`，避免长时间循环或妨碍操作的过场。
 5. 升级依赖时同时更新精确版本、pnpm 锁文件和本文件中的主版本说明；引入新基础设施前先确认本表是否已有等价方案。
+6. 任何源码文件不超过 400 行，见上方"代码门禁"一节；新增功能导致文件超限时先拆分再继续。
