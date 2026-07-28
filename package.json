@@ -1,6 +1,7 @@
 {
   "name": "aimonitor-desktop",
   "displayName": "AIMonitorDesktop",
+  "releaseName": "AIMonitorDesktop",
   "description": "AI监控平台桌面版",
   "author": "ManonLoki",
   "private": true,

@@ -24,8 +24,10 @@ Common: Node.js 22.12+, pnpm 10, Rust stable, installed frontend dependencies.
 
 macOS signing uses the Developer ID identity declared in
 `src-tauri/tauri.macos.conf.json` and installed in the login keychain. Notarization
-is enabled by Tauri when either its Apple ID app-specific password variables or
-App Store Connect API key variables are also present.
+is completed automatically by Tauri when either its Apple ID app-specific password
+variables or App Store Connect API key variables are present. Otherwise the release
+script uses the `AIMonitorNotary` keychain profile (overridable with
+`AIMONITOR_NOTARY_PROFILE`) and refuses to publish without a stapled ticket.
 
 macOS host:
 
@@ -47,6 +49,7 @@ On Linux, install LLVM or LLD and NSIS with the system package manager, then ins
 
 | Concern | Source |
 | --- | --- |
+| Published artifact prefix and version | `package.json` (`releaseName`, `version`) |
 | Product and main binary name | `src-tauri/tauri.conf.json` |
 | macOS bundle target | `src-tauri/tauri.macos.conf.json` |
 | Windows NSIS target and branding | `src-tauri/tauri.windows.conf.json` |
@@ -64,5 +67,7 @@ On Linux, install LLVM or LLD and NSIS with the system package manager, then ins
 - Missing macOS signing identity: install the Developer ID Application certificate,
   including its private key, in the login keychain and keep the identity in
   `tauri.macos.conf.json` synchronized with that certificate.
-- A signed but unnotarized macOS artifact means notarization credentials were not
-  supplied. Keep those credentials outside the repository.
+- Missing `AIMonitorNotary` credentials: create a Developer-role App Store Connect
+  API key and use `xcrun notarytool store-credentials AIMonitorNotary --key
+  "<AuthKey.p8>" --key-id "<KEY_ID>" --issuer "<ISSUER_ID>"`. Keep credentials
+  outside the repository.

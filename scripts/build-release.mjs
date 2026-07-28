@@ -22,10 +22,27 @@ const tauriRoot = join(projectRoot, "src-tauri");
 const publishDir = join(projectRoot, "publish");
 const projectCargoTargetDir = join(tauriRoot, "target");
 const packageJson = JSON.parse(readFileSync(join(projectRoot, "package.json"), "utf8"));
+const tauriConfig = JSON.parse(readFileSync(join(tauriRoot, "tauri.conf.json"), "utf8"));
+const cargoManifest = readFileSync(join(tauriRoot, "Cargo.toml"), "utf8");
+const cargoVersion = cargoManifest.match(/\[package\][\s\S]*?^version\s*=\s*"([^"]+)"/m)?.[1];
+const releaseName = packageJson.releaseName;
 const version = packageJson.version;
+const productName = tauriConfig.productName;
+const mainBinaryName = tauriConfig.mainBinaryName;
 const requestedPlatform = process.argv[2] ?? "all";
 const supportedPlatforms = new Set(["mac", "win", "all"]);
 
+if (typeof releaseName !== "string" || !/^[A-Za-z0-9]+$/.test(releaseName)) {
+  throw new Error("package.json releaseName 必须是非空的 ASCII 字母数字名称");
+}
+if (version !== tauriConfig.version || version !== cargoVersion) {
+  throw new Error(
+    `版本不一致：package.json=${version}, tauri.conf.json=${tauriConfig.version}, Cargo.toml=${cargoVersion}`,
+  );
+}
+if (typeof productName !== "string" || typeof mainBinaryName !== "string") {
+  throw new Error("tauri.conf.json 必须定义 productName 和 mainBinaryName");
+}
 if (!supportedPlatforms.has(requestedPlatform)) {
   throw new Error("用法：node scripts/build-release.mjs [mac|win|all]");
 }
@@ -50,6 +67,50 @@ function commandExists(command, env = process.env) {
     stdio: "ignore",
   });
   return !probe.error;
+}
+
+function commandSucceeds(command, args, env = process.env) {
+  const result = spawnSync(command, args, {
+    cwd: projectRoot,
+    env,
+    stdio: "ignore",
+  });
+  return !result.error && result.status === 0;
+}
+
+function notarizeAndVerifyMacArtifact(artifact, env) {
+  if (!commandSucceeds("xcrun", ["stapler", "validate", artifact], env)) {
+    const profile = process.env.AIMONITOR_NOTARY_PROFILE ?? "AIMonitorNotary";
+    run(
+      "xcrun",
+      [
+        "notarytool",
+        "submit",
+        artifact,
+        "--keychain-profile",
+        profile,
+        "--wait",
+        "--timeout",
+        "30m",
+      ],
+      env,
+    );
+    run("xcrun", ["stapler", "staple", artifact], env);
+  }
+  run("xcrun", ["stapler", "validate", artifact], env);
+  run(
+    "spctl",
+    [
+      "--assess",
+      "--verbose=2",
+      "--type",
+      "open",
+      "--context",
+      "context:primary-signature",
+      artifact,
+    ],
+    env,
+  );
 }
 
 function filesBelow(directory, extension) {
@@ -77,6 +138,14 @@ function buildMac() {
     throw new Error("macOS DMG 必须在 macOS 主机上构建");
   }
   const target = process.env.AIMONITOR_MAC_TARGET ?? "universal-apple-darwin";
+  const supportedTargets = new Set([
+    "universal-apple-darwin",
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+  ]);
+  if (!supportedTargets.has(target)) {
+    throw new Error(`不支持的 AIMONITOR_MAC_TARGET：${target}`);
+  }
   if (target === "universal-apple-darwin") {
     run("rustup", ["target", "add", "aarch64-apple-darwin", "x86_64-apple-darwin"]);
   } else {
@@ -92,6 +161,7 @@ function buildMac() {
     ".dmg",
   );
   run("codesign", ["--verify", "--strict", "--verbose=2", source], env);
+  notarizeAndVerifyMacArtifact(source, env);
   const architecture = target === "universal-apple-darwin"
     ? "universal"
     : target.startsWith("aarch64")
@@ -99,7 +169,7 @@ function buildMac() {
       : "x64";
   return {
     source,
-    filename: `AIMonitorDesktop-macOS-${architecture}-v${version}.dmg`,
+    filename: `${releaseName}-macOS-${architecture}-v${version}.dmg`,
   };
 }
 
@@ -136,7 +206,7 @@ function buildWindows() {
   );
   return {
     source,
-    filename: `AIMonitorDesktop-Windows-x64-v${version}-setup.exe`,
+    filename: `${releaseName}-Windows-x64-v${version}-setup.exe`,
   };
 }
 
@@ -156,7 +226,7 @@ for (const artifact of artifacts) {
   console.log(`已发布：${destination}`);
 }
 writeFileSync(
-  join(publishDir, "AIMonitorDesktop-SHA256SUMS.txt"),
+  join(publishDir, `${releaseName}-SHA256SUMS.txt`),
   `${checksums.join("\n")}\n`,
 );
-console.log(`\npublish 已清理并写入 ${artifacts.length} 个 AIMonitorDesktop 安装包。`);
+console.log(`\npublish 已清理并写入 ${artifacts.length} 个 ${releaseName} 安装包。`);
