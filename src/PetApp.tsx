@@ -1,12 +1,8 @@
-import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useMemo, useRef, type MouseEvent, type WheelEvent } from "react";
 import { useMonitorState } from "./hooks/useMonitorState";
 import { useWindowState } from "./hooks/useWindowState";
-import type { MonitorTile } from "./types/monitor";
-
-
-const call = (command: string, args?: Record<string, unknown>) =>
-  invoke<void>(command, args).catch(() => undefined);
+import { call } from "./lib/tauri";
+import { buildImageUrl, type MonitorTile } from "./types/monitor";
 
 function PetTile({ tile, index, imageUrl }: {
   tile?: MonitorTile;
@@ -56,6 +52,8 @@ export function PetApp() {
   };
 
   const turnPage = (direction: -1 | 1) => focusPage(pageIndex + direction);
+  const turnPageRef = useRef(turnPage);
+  turnPageRef.current = turnPage;
 
   const switchToMain = () => void call("switch_app_mode", { mode: "main" });
   const openSettings = () => void call("show_pet_settings");
@@ -89,12 +87,12 @@ export function PetApp() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "ArrowLeft") turnPage(-1);
-      if (event.key === "ArrowRight") turnPage(1);
+      if (event.key === "ArrowLeft") turnPageRef.current(-1);
+      if (event.key === "ArrowRight") turnPageRef.current(1);
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  });
+  }, []);
 
   return (
     <main
@@ -110,7 +108,7 @@ export function PetApp() {
         {pageSlots.map((slot) => {
           const tile = slot < visibleSlotCount ? monitor.tiles[slot] : undefined;
           const imageUrl = tile?.imageFilename
-            ? `http://127.0.0.1:${monitor.port}/api/images/${encodeURIComponent(tile.imageFilename)}`
+            ? buildImageUrl(monitor.port, tile.imageFilename)
             : undefined;
           return <PetTile tile={tile} index={slot} imageUrl={imageUrl} key={slot} />;
         })}

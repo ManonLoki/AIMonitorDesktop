@@ -49,9 +49,8 @@ use commands::{
 use runtime::{load_preferences, Runtime};
 use std::fs;
 use tauri::{Manager, WindowEvent};
-use window_geometry::{
-    clamp_window_to_work_area, constrain_pet_to_current_monitor, keep_pet_square, save_window_state,
-};
+use window_geometry::save_window_state;
+use window_manager::{handle_window_moved, handle_window_resized};
 
 // Tauri 应用入口：注册插件、装配 Runtime、启动三个子系统、暴露 Tauri 命令。
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -98,19 +97,10 @@ pub fn run() {
                 let window_for_events = window.clone();
                 window.on_window_event(move |event| {
                     if let WindowEvent::Resized(size) = event {
-                        if window_for_events.label() == "pet" {
-                            keep_pet_square(&window_for_events, *size, &runtime_for_events);
-                            clamp_window_to_work_area(&window_for_events);
-                        }
+                        handle_window_resized(&window_for_events, *size, &runtime_for_events);
                         save_window_state(&window_for_events, &runtime_for_events, false);
                     } else if matches!(event, WindowEvent::Moved(_)) {
-                        if window_for_events.label() == "pet" {
-                            constrain_pet_to_current_monitor(
-                                &window_for_events,
-                                &runtime_for_events,
-                            );
-                            runtime_for_events.window_changed();
-                        }
+                        handle_window_moved(&window_for_events, &runtime_for_events);
                         save_window_state(&window_for_events, &runtime_for_events, false);
                     }
                     if let WindowEvent::CloseRequested { api, .. } = event {

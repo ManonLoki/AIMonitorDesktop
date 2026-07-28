@@ -30,6 +30,11 @@ export interface MonitorState {
   tiles: MonitorTile[]; // 固定长度 25 的宫格数组
 }
 
+// 桌面端内置 HTTP 服务器提供的图片 URL（src-tauri/src/http/images.rs）；
+// 走本机回环地址而非局域网地址，避免受网络环境影响；文件名做 URL 编码，防止特殊字符破坏路径。
+export const buildImageUrl = (port: number, filename: string) =>
+  `http://127.0.0.1:${port}/api/images/${encodeURIComponent(filename)}`;
+
 // 生成一个空宫格，用于初始占位。
 export const emptyTile = (): MonitorTile => ({
   username: "", // 空用户名，等待客户端推送

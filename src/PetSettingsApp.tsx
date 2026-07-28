@@ -1,10 +1,7 @@
-import { invoke } from "@tauri-apps/api/core";
 import { PetContextMenu } from "./components/PetContextMenu";
 import { useWindowState } from "./hooks/useWindowState";
+import { call } from "./lib/tauri";
 import type { PetLayout } from "./types/window";
-
-const call = (command: string, args?: Record<string, unknown>) =>
-  invoke<void>(command, args).catch(() => undefined);
 
 export function PetSettingsApp() {
   const { state } = useWindowState();

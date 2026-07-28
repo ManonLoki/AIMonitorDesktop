@@ -259,32 +259,27 @@ pub(crate) fn save_window_state(window: &WebviewWindow, runtime: &SharedRuntime,
     }
 }
 
-pub(crate) fn keep_pet_square(
-    window: &WebviewWindow,
-    size: PhysicalSize<u32>,
-    runtime: &SharedRuntime,
-) {
-    let layout = runtime
+pub(crate) fn keep_pet_square(window: &WebviewWindow, size: PhysicalSize<u32>, runtime: &SharedRuntime) {
+    let (layout, previous) = runtime
         .windows
         .lock()
-        .map(|windows| windows.pet_window.layout)
-        .unwrap_or_default();
-    let previous = runtime
-        .windows
-        .lock()
-        .ok()
-        .and_then(|windows| match windows.pet_window.layout {
-            PetLayout::Single => windows.pet_window.single_geometry.clone(),
-            PetLayout::Grid => windows.pet_window.grid_geometry.clone(),
+        .map(|windows| {
+            let layout = windows.pet_window.layout;
+            let previous = match layout {
+                PetLayout::Single => windows.pet_window.single_geometry.clone(),
+                PetLayout::Grid => windows.pet_window.grid_geometry.clone(),
+            };
+            (layout, previous)
         })
-        .map(|geometry| {
-            size_for_scale(
-                &geometry,
-                window
-                    .scale_factor()
-                    .unwrap_or(geometry.scale_factor.max(1.0)),
-            )
-        });
+        .unwrap_or_default();
+    let previous = previous.map(|geometry| {
+        size_for_scale(
+            &geometry,
+            window
+                .scale_factor()
+                .unwrap_or(geometry.scale_factor.max(1.0)),
+        )
+    });
     let scale = window.scale_factor().unwrap_or(1.0);
     let footer = (f64::from(PET_PAGER_HEIGHT) * scale).round() as u32;
     let requested_canvas = previous.map_or(size.width, |previous| {

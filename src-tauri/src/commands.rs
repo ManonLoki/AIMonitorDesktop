@@ -27,10 +27,8 @@ pub(crate) fn set_grid(
     } // 写锁在此处离开作用域被释放，之后再落盘/广播，缩短持锁时间
     {
         let mut windows = runtime.windows.lock().map_err(|_| "窗口状态不可用")?;
-        windows.pet_window.focused_slot = windows
-            .pet_window
-            .focused_slot
-            .min(rows.saturating_mul(columns) - 1);
+        windows.pet_window.focused_slot =
+            window_manager::clamp_focused_slot(windows.pet_window.focused_slot, rows, columns);
     }
     runtime.save_preferences(); // 持久化到 preferences.json
     runtime.changed(); // 通知前端刷新
