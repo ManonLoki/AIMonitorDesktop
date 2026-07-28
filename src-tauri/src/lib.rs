@@ -12,7 +12,8 @@
 // - commands.rs          5 个 #[tauri::command]，前端唯一的写入入口
 // - device_info.rs       默认设备名、局域网 IP 探测
 // - image.rs              图片格式探测、GIF 循环修正、文件名校验、异步文件探测
-// - window_geometry.rs    窗口几何的可用性判断、恢复与保存
+// - window_geometry.rs    窗口几何持久化：可用性判断、恢复与保存
+// - pet_geometry.rs       桌宠窗口的尺寸约束与跨显示器收敛（与几何持久化职责分开）
 // - discovery.rs          UDP 主动发现（纯异步）
 // - mdns.rs                mDNS 服务注册
 // - http/                 基于 Axum 的纯异步 HTTP 服务器：mod.rs 负责路由挂载与共享的
@@ -35,17 +36,23 @@ mod http;
 mod image;
 mod mdns;
 mod model;
+mod pet_geometry;
 mod runtime;
 mod tray;
 mod window_geometry;
+mod window_manager;
 
 use commands::{
-    get_monitor_state, set_auto_start, set_device_name, set_grid, set_image_display_mode,
+    get_monitor_state, get_window_state, hide_current_window, hide_pet_settings, resize_pet_by,
+    set_auto_start, set_device_name, set_grid, set_image_display_mode, set_pet_always_on_top,
+    set_pet_focused_slot, set_pet_layout, set_pet_locked, set_pet_size, show_pet_settings,
+    start_pet_drag, switch_app_mode,
 };
 use runtime::{load_preferences, Runtime};
 use std::fs;
 use tauri::{Manager, WindowEvent};
-use window_geometry::{restore_window, save_window_geometry};
+use window_geometry::save_window_state;
+use window_manager::{handle_window_moved, handle_window_resized};
 
 // Tauri 应用入口：注册插件、装配 Runtime、启动三个子系统、暴露 Tauri 命令。
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -53,9 +60,9 @@ pub fn run() {
     tauri::Builder::default()
         // 单实例限制：必须是注册的第一个插件（Tauri 官方要求），否则无法保证在
         // 其他插件初始化之前拦截到"已有实例正在运行"这一事件。第二次启动时不再
-        // 创建新窗口/新进程，而是把已运行实例的主窗口取消最小化、显示并置前。
+        // 创建新窗口/新进程，而是恢复当前活动模式的窗口。
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-            tray::show_main_window(app);
+            tray::show_active_window(app);
         }))
         .plugin(tauri_plugin_autostart::Builder::new().build()) // 开机自启插件
         .plugin(tauri_plugin_opener::init()) // 系统级"用默认程序打开"插件（前端未直接用到，但保留通用能力）
@@ -74,9 +81,6 @@ pub fn run() {
                 .autolaunch()
                 .is_enabled()
                 .unwrap_or(preferences.auto_start);
-            if let Some(window) = app.get_webview_window("main") {
-                restore_window(&window, preferences.window.as_ref())?; // 按历史几何或默认策略摆放主窗口
-            }
             let runtime = Runtime::new(
                 app_handle,
                 image_dir,
@@ -87,20 +91,26 @@ pub fn run() {
             );
             runtime.save_preferences(); // 首次落盘，规范化/补全可能缺失的字段
             let tray_menu = tray::setup(app, runtime.clone(), auto_start)?; // 创建托盘菜单并绑定共享状态
-            if let Some(window) = app.get_webview_window("main") {
-                let runtime_for_events = runtime.clone(); // 为窗口事件回调准备独立的 Arc 克隆
+            // 三个窗口共用同一套事件回调：这里本身不知道、也不关心哪个 label 是桌宠——
+            // handle_window_resized/handle_window_moved 内部才按 label 判断要不要跑桌宠专属逻辑，
+            // 保证以后新增第四个窗口时这段循环不用改。
+            for label in ["main", "pet", "pet-settings"] {
+                let Some(window) = app.get_webview_window(label) else {
+                    continue;
+                };
+                let runtime_for_events = runtime.clone();
                 let window_for_events = window.clone();
                 window.on_window_event(move |event| {
-                    if matches!(
-                        event,
-                        WindowEvent::Moved(_)
-                            | WindowEvent::Resized(_)
-                            | WindowEvent::CloseRequested { .. } // 移动、缩放、即将关闭时都需要记录最新几何
-                    ) {
-                        save_window_geometry(&window_for_events, &runtime_for_events);
+                    if let WindowEvent::Resized(size) = event {
+                        handle_window_resized(&window_for_events, *size, &runtime_for_events);
+                        save_window_state(&window_for_events, &runtime_for_events, false); // false=防抖写盘，resize 是高频事件
+                    } else if matches!(event, WindowEvent::Moved(_)) {
+                        handle_window_moved(&window_for_events, &runtime_for_events);
+                        save_window_state(&window_for_events, &runtime_for_events, false);
                     }
                     if let WindowEvent::CloseRequested { api, .. } = event {
-                        api.prevent_close(); // 关闭主窗口时保留后台服务和托盘
+                        save_window_state(&window_for_events, &runtime_for_events, true); // true=立即落盘，关闭前必须保证写入成功
+                        api.prevent_close(); // 阻止真正关闭：这三个窗口只隐藏不销毁，托盘/再次打开时复用
                         let _ = window_for_events.hide();
                     }
                 });
@@ -111,7 +121,9 @@ pub fn run() {
             mdns::start_mdns(&runtime); // 注册 mDNS 服务
             runtime.state.write().expect("state lock poisoned").port = port; // 用真实端口覆盖占位值（start_http_server 内部其实已经写过一次，这里是双保险）
             app.manage(tray_menu); // 供设置页命令同步托盘中的“开机自启”勾选状态
-            app.manage(runtime); // 交给 Tauri 管理，之后各 #[tauri::command] 才能通过 State 取到它
+            app.manage(runtime.clone()); // 交给 Tauri 管理，之后各 #[tauri::command] 才能通过 State 取到它
+            window_manager::show_active_window(app.handle(), &runtime)
+                .map_err(std::io::Error::other)?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -119,7 +131,19 @@ pub fn run() {
             set_grid,
             set_image_display_mode,
             set_device_name,
-            set_auto_start
+            set_auto_start,
+            get_window_state,
+            switch_app_mode,
+            hide_current_window,
+            show_pet_settings,
+            hide_pet_settings,
+            set_pet_layout,
+            set_pet_focused_slot,
+            set_pet_always_on_top,
+            set_pet_locked,
+            set_pet_size,
+            resize_pet_by,
+            start_pet_drag
         ]) // 注册所有可从前端 invoke 调用的命令
         .run(tauri::generate_context!())
         .expect("AIMonitorDesktop 启动失败");

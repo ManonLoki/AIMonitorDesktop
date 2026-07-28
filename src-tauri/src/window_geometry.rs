@@ -1,11 +1,17 @@
-// 窗口位置/尺寸的跨会话恢复与持久化：判断历史坐标是否仍落在可用显示器内，
-// 启动时按此决定恢复位置还是走"主显示器 + 最大化"的默认策略。
-use crate::model::WindowGeometry;
+//! 主窗口与桌宠窗口的几何持久化：保存、跨 DPI 恢复和工作区收敛。
+//! 桌宠尺寸约束/跨显示器收敛的数学在 pet_geometry.rs（职责分开，避免单文件超过 400 行）。
+
+use crate::model::{MainWindowPreferences, PetLayout, WindowGeometry};
+use crate::pet_geometry::{apply_pet_constraints, pet_size_range_for_monitor, physical_pet_window_size};
 use crate::runtime::SharedRuntime;
 use tauri::{PhysicalPosition, PhysicalSize, WebviewWindow};
 
-// 判断保存的窗口矩形与某个显示器工作区是否有"足够可见"的重叠——
-// 用于窗口恢复时排除已经被移除/断开的显示器上的历史坐标。
+const MAIN_LABEL: &str = "main";
+const PET_LABEL: &str = "pet";
+pub(crate) const PET_PAGER_HEIGHT: u16 = 24;
+// 判断上次保存的窗口矩形是否还落在这块显示器上：显示器被拔掉/换分辨率后，
+// 保存的坐标可能落在虚空里，这时应该改用默认位置而不是把窗口摆到看不见的地方。
+// 用 i64 计算是因为 x+width 这类求和在极端坐标下可能超出 i32 范围。
 pub(crate) fn rectangles_have_visible_overlap(
     window: &WindowGeometry,
     monitor_x: i32,
@@ -13,115 +19,258 @@ pub(crate) fn rectangles_have_visible_overlap(
     monitor_width: u32,
     monitor_height: u32,
 ) -> bool {
-    let left = i64::from(window.x).max(i64::from(monitor_x)); // 重叠区域左边界：取两矩形左边界的较大值
-    let top = i64::from(window.y).max(i64::from(monitor_y)); // 重叠区域上边界：取两矩形上边界的较大值
+    let left = i64::from(window.x).max(i64::from(monitor_x)); // 两个矩形重叠区域的左边界
+    let top = i64::from(window.y).max(i64::from(monitor_y));
     let right = (i64::from(window.x) + i64::from(window.width))
-        .min(i64::from(monitor_x) + i64::from(monitor_width)); // 重叠区域右边界：取两矩形右边界的较小值
+        .min(i64::from(monitor_x) + i64::from(monitor_width));
     let bottom = (i64::from(window.y) + i64::from(window.height))
-        .min(i64::from(monitor_y) + i64::from(monitor_height)); // 重叠区域下边界：取两矩形下边界的较小值
-    // 至少要有 64x64 像素的重叠区域才算"可见"，避免窗口只露出一条边缘的边界情况。
-    let required_width = i64::from(window.width.min(64)); // 窗口本身若小于 64px 则要求完全重叠
+        .min(i64::from(monitor_y) + i64::from(monitor_height));
+    // 不要求整个窗口都在屏幕内，只要至少 64 物理像素可见（或窗口本身更小）就算“够得着”，
+    // 用户还能用鼠标拖回来；完全看不见才判定为需要重置到默认位置。
+    let required_width = i64::from(window.width.min(64));
     let required_height = i64::from(window.height.min(64));
-    right - left >= required_width && bottom - top >= required_height // 重叠区域的宽高都需达到阈值
+    right - left >= required_width && bottom - top >= required_height
 }
 
-// 保存的窗口几何是否落在当前任意一块可用显示器范围内。
-fn window_geometry_is_available(window: &WebviewWindow, geometry: &WindowGeometry) -> bool {
-    if geometry.width == 0 || geometry.height == 0 {
-        return false; // 尺寸为 0 的历史记录视为无效
+// 把上次保存的物理像素尺寸换算到目标显示器的缩放比例下：同一份逻辑尺寸在
+// 不同 DPI 显示器上的物理像素不同，直接套用旧的物理像素会导致窗口忽大忽小。
+pub(crate) fn size_for_scale(geometry: &WindowGeometry, target_scale: f64) -> PhysicalSize<u32> {
+    if geometry.scale_factor > 0.0 {
+        let ratio = target_scale / geometry.scale_factor; // 新旧缩放比例的换算系数
+        PhysicalSize::new(
+            (f64::from(geometry.width) * ratio).round().max(1.0) as u32,
+            (f64::from(geometry.height) * ratio).round().max(1.0) as u32,
+        )
+    } else {
+        // 1.1 及更早版本没有 scaleFactor，宽高就是原始物理像素。
+        PhysicalSize::new(geometry.width, geometry.height)
     }
-    window
-        .available_monitors() // 查询当前所有已连接显示器
-        .map(|monitors| {
-            monitors.iter().any(|monitor| {
-                let area = monitor.work_area(); // 排除任务栏/Dock 之后的可用工作区
-                rectangles_have_visible_overlap(
-                    geometry,
-                    area.position.x,
-                    area.position.y,
-                    area.size.width,
-                    area.size.height,
-                )
-            })
-        })
-        .unwrap_or(false) // 查询显示器失败时保守地认为不可用，走默认摆放逻辑
 }
 
-// 应用启动时恢复窗口：优先使用保存的几何信息（前提是仍在可用显示器范围内），
-// 否则回退到"主显示器 + 最大化"，满足产品要求里"启动即最大化"的强制项。
-pub(crate) fn restore_window(
+// 在当前所有显示器里找出“上次保存的窗口矩形”还够得着的那一块，用于恢复时
+// 判断该用保存的坐标，还是显示器已经变了、要退回默认位置。
+fn monitor_index_for_geometry(window: &WebviewWindow, geometry: &WindowGeometry) -> Option<usize> {
+    let monitors = window.available_monitors().ok()?;
+    monitors.iter().position(|monitor| {
+        let area = monitor.work_area();
+        // 先把保存的尺寸换算到这块显示器的缩放比例下，再判断重叠，
+        // 避免用错误的缩放比例得出错误的可见性结论。
+        let scaled = size_for_scale(geometry, monitor.scale_factor());
+        let candidate = WindowGeometry {
+            x: geometry.x,
+            y: geometry.y,
+            width: scaled.width,
+            height: scaled.height,
+            scale_factor: monitor.scale_factor(),
+        };
+        rectangles_have_visible_overlap(
+            &candidate,
+            area.position.x,
+            area.position.y,
+            area.size.width,
+            area.size.height,
+        )
+    })
+}
+
+// 把窗口左上角坐标收敛到工作区内，使整个窗口（按传入的 size）都落在可见范围。
+// 窗口比工作区还大时，max_x/max_y 会被夹到 area_position，退化成贴左上角对齐。
+pub(crate) fn clamped_position(
+    x: i32,
+    y: i32,
+    size: PhysicalSize<u32>,
+    area_position: PhysicalPosition<i32>,
+    area_size: PhysicalSize<u32>,
+) -> PhysicalPosition<i32> {
+    let right = i64::from(area_position.x) + i64::from(area_size.width);
+    let bottom = i64::from(area_position.y) + i64::from(area_size.height);
+    let max_x = (right - i64::from(size.width)).max(i64::from(area_position.x)); // 允许的最大左上角 x，保证右边不越界
+    let max_y = (bottom - i64::from(size.height)).max(i64::from(area_position.y));
+    PhysicalPosition::new(
+        i64::from(x).clamp(i64::from(area_position.x), max_x) as i32,
+        i64::from(y).clamp(i64::from(area_position.y), max_y) as i32,
+    )
+}
+
+// 应用启动/切回主窗口时调用：优先恢复上次保存的位置和尺寸（若所在显示器还在），
+// 恢复后再按 maximized 标记决定是否最大化；找不到可用的保存位置就退回默认的
+// “贴到主显示器工作区左上角并最大化”。
+pub(crate) fn restore_main_window(
+    window: &WebviewWindow,
+    preferences: &MainWindowPreferences,
+) -> tauri::Result<()> {
+    if let Some(geometry) = preferences.normal_geometry.as_ref() {
+        if let Some(index) = monitor_index_for_geometry(window, geometry) {
+            let monitors = window.available_monitors()?;
+            let monitor = &monitors[index];
+            let size = size_for_scale(geometry, monitor.scale_factor());
+            window.unmaximize()?; // 先取消最大化才能自由 set_size/set_position
+            window.set_size(size)?;
+            window.set_position(clamped_position(
+                geometry.x,
+                geometry.y,
+                size,
+                monitor.work_area().position,
+                monitor.work_area().size,
+            ))?;
+            if preferences.maximized {
+                window.maximize()?; // 恢复到正确位置后再最大化，避免在错误的显示器上最大化
+            }
+            return Ok(());
+        }
+    }
+
+    // 没有可用的保存几何（首次启动或显示器已变化）：贴主显示器工作区左上角并直接最大化。
+    if let Some(primary) = window.primary_monitor()? {
+        window.set_position(primary.work_area().position)?;
+    }
+    window.maximize()
+}
+
+// 切到桌宠模式（或该布局第一次显示）时调用：优先恢复该布局上次保存的位置/尺寸；
+// 找不到可用的保存位置（首次使用该布局，或显示器已变化）就退回默认位置——
+// 贴当前/主显示器工作区右下角，留出 16 逻辑像素的边距，方便用户第一眼就能找到桌宠。
+pub(crate) fn restore_pet_window(
     window: &WebviewWindow,
     geometry: Option<&WindowGeometry>,
+    layout: PetLayout,
+    pet_size: u16,
 ) -> tauri::Result<()> {
-    if let Some(geometry) =
-        geometry.filter(|geometry| window_geometry_is_available(window, geometry)) // 历史几何存在且仍落在可用显示器内
-    {
-        window.unmaximize()?; // 先取消可能残留的最大化状态，才能设置自定义大小/位置
-        window.set_size(PhysicalSize::new(geometry.width, geometry.height))?;
-        window.set_position(PhysicalPosition::new(geometry.x, geometry.y))?;
-        return Ok(()); // 已按历史几何恢复，不再走最大化兜底
+    apply_pet_constraints(window, layout)?; // 先设好这块显示器允许的 min/max，再 set_size 才不会被系统钳制
+    if let Some(geometry) = geometry {
+        if let Some(index) = monitor_index_for_geometry(window, geometry) {
+            let monitors = window.available_monitors()?;
+            let monitor = &monitors[index];
+            let saved_size = size_for_scale(geometry, monitor.scale_factor());
+            let (min, max) = pet_size_range_for_monitor(monitor, layout);
+            let scale = monitor.scale_factor();
+            let footer = (f64::from(PET_PAGER_HEIGHT) * scale).round() as u32; // 翻页条高度换算成物理像素
+            // 保存的宽/高可能因为四舍五入不完全相等，取更大的一边（扣掉翻页条后）作为画布边长。
+            let requested_canvas = saved_size
+                .width
+                .max(saved_size.height.saturating_sub(footer));
+            let canvas_size = (f64::from(requested_canvas) / scale).round() as u16;
+            let size = physical_pet_window_size(canvas_size.clamp(min, max), scale);
+            window.set_size(size)?;
+            window.set_position(clamped_position(
+                geometry.x,
+                geometry.y,
+                size,
+                monitor.work_area().position,
+                monitor.work_area().size,
+            ))?;
+            return Ok(());
+        }
     }
 
-    if let Some(primary_monitor) = window.primary_monitor()? {
-        let position = primary_monitor.work_area().position; // 把窗口先移动到主显示器工作区起点
-        window.set_position(PhysicalPosition::new(position.x, position.y))?;
-    }
-    window.maximize() // 产品要求：无有效历史几何时必须以最大化状态启动
+    // 默认位置分支：优先用主显示器，取不到再退回窗口当前所在的显示器。
+    let monitor = window
+        .primary_monitor()?
+        .or(window.current_monitor()?)
+        .ok_or_else(|| tauri::Error::FailedToReceiveMessage)?;
+    let (min, max) = pet_size_range_for_monitor(&monitor, layout);
+    let scale = monitor.scale_factor();
+    let size = physical_pet_window_size(pet_size.clamp(min, max), scale);
+    let area = monitor.work_area();
+    let margin = (16.0 * scale).round() as i32; // 16 逻辑像素的贴边距，避免正好贴住屏幕边缘
+    window.set_size(size)?;
+    window.set_position(PhysicalPosition::new(
+        area.position.x + area.size.width as i32 - size.width as i32 - margin,
+        area.position.y + area.size.height as i32 - size.height as i32 - margin,
+    ))
 }
 
-// 窗口移动/缩放/关闭时调用：只在非最小化、非最大化状态下记录几何信息，
-// 因为最大化时的 outer_position/inner_size 并不代表用户期望的"正常窗口大小"。
-pub(crate) fn save_window_geometry(window: &WebviewWindow, runtime: &SharedRuntime) {
-    if window.is_minimized().unwrap_or(false) || window.is_maximized().unwrap_or(false) {
-        return; // 最小化/最大化状态下的几何数据没有参考价值，跳过保存
+// 把窗口当前的位置/尺寸（或主窗口的最大化标记）写回内存中的 windows 状态，
+// 不负责落盘——落盘由调用方通过 save_window_state 决定是否需要防抖。
+pub(crate) fn capture_window_state(window: &WebviewWindow, runtime: &SharedRuntime) {
+    if window.is_minimized().unwrap_or(false) {
+        return; // 最小化时的坐标/尺寸没有意义，不覆盖已保存的正常状态
+    }
+    let mut windows = runtime.windows.lock().expect("window state lock poisoned");
+    if window.label() == MAIN_LABEL {
+        windows.main_window.maximized = window.is_maximized().unwrap_or(false);
+        if windows.main_window.maximized {
+            return; // 最大化时不记录矩形，保留上一次非最大化时的位置，下次取消最大化能恢复回去
+        }
     }
     let (Ok(position), Ok(size)) = (window.outer_position(), window.inner_size()) else {
-        return; // 查询失败（例如窗口正在关闭过程中）则放弃本次保存
+        return;
     };
     if size.width == 0 || size.height == 0 {
-        return; // 尺寸异常为 0，不值得保存
+        return; // 窗口刚创建还未真正 map 时可能读到 0，不能当作有效状态保存
     }
-    *runtime
-        .window_geometry
-        .lock()
-        .expect("window geometry lock poisoned") = Some(WindowGeometry {
+    let geometry = WindowGeometry {
         x: position.x,
         y: position.y,
         width: size.width,
         height: size.height,
-    }); // 更新内存中待落盘的窗口几何
-    runtime.save_preferences(); // 立即落盘，避免应用异常退出导致这次几何变化丢失
+        scale_factor: window.scale_factor().unwrap_or(1.0),
+    };
+    // 主窗口只有一份几何；桌宠窗口按当前布局分别保存到 single/grid 两个槽位，
+    // 这样切换布局后各自都能恢复到上次的位置，不会互相覆盖。
+    match window.label() {
+        MAIN_LABEL => windows.main_window.normal_geometry = Some(geometry),
+        PET_LABEL => match windows.pet_window.layout {
+            PetLayout::Single => windows.pet_window.single_geometry = Some(geometry),
+            PetLayout::Grid => windows.pet_window.grid_geometry = Some(geometry),
+        },
+        _ => {} // pet-settings 窗口不持久化几何，每次都重新居中显示
+    }
+}
+
+// immediate=true 用于关闭窗口等必须立刻落盘的场景；false 用于 resize/move 这类高频事件，
+// 走 save_preferences_debounced 合并连续事件，避免每个像素的移动都写一次磁盘。
+pub(crate) fn save_window_state(window: &WebviewWindow, runtime: &SharedRuntime, immediate: bool) {
+    capture_window_state(window, runtime);
+    if immediate {
+        runtime.save_preferences();
+    } else {
+        runtime.save_preferences_debounced();
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    fn geometry(x: i32, width: u32) -> WindowGeometry {
+        WindowGeometry {
+            x,
+            y: 100,
+            width,
+            height: 700,
+            scale_factor: 1.0,
+        }
+    }
     #[test]
     fn accepts_geometry_with_a_reachable_window_area() {
-        let geometry = WindowGeometry {
-            x: 1_856, // 窗口大部分落在 1920x1080 显示器范围内
-            y: 100,
-            width: 1_000,
-            height: 700,
-        };
-
         assert!(rectangles_have_visible_overlap(
-            &geometry, 0, 0, 1_920, 1_080
-        )); // 应判定为可见
+            &geometry(1_856, 1_000),
+            0,
+            0,
+            1_920,
+            1_080
+        ));
     }
-
     #[test]
     fn rejects_geometry_left_on_a_removed_monitor() {
-        let geometry = WindowGeometry {
-            x: 1_900, // 窗口几乎完全落在显示器边界之外
-            y: 100,
-            width: 1_000,
-            height: 700,
-        };
-
         assert!(!rectangles_have_visible_overlap(
-            &geometry, 0, 0, 1_920, 1_080
-        )); // 应判定为不可见（视为已断开的旧显示器坐标）
+            &geometry(1_900, 1_000),
+            0,
+            0,
+            1_920,
+            1_080
+        ));
+    }
+    #[test]
+    fn rescales_saved_physical_size_for_new_dpi() {
+        let saved = WindowGeometry {
+            x: 0,
+            y: 0,
+            width: 400,
+            height: 400,
+            scale_factor: 2.0,
+        };
+        assert_eq!(size_for_scale(&saved, 1.0), PhysicalSize::new(200, 200));
     }
 }

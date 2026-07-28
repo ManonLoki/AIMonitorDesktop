@@ -60,6 +60,22 @@ function run(command, args, env = process.env) {
   }
 }
 
+function runWithRetries(command, args, env, maxAttempts = 3) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      run(command, args, env);
+      return;
+    } catch (error) {
+      if (attempt === maxAttempts) throw error;
+      const delaySeconds = attempt * 5;
+      console.warn(
+        `${command} 第 ${attempt} 次失败，${delaySeconds} 秒后重试（最多 ${maxAttempts} 次）`,
+      );
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delaySeconds * 1000);
+    }
+  }
+}
+
 function commandExists(command, env = process.env) {
   const probe = spawnSync(command, ["--version"], {
     cwd: projectRoot,
@@ -81,7 +97,7 @@ function commandSucceeds(command, args, env = process.env) {
 function notarizeAndVerifyMacArtifact(artifact, env) {
   if (!commandSucceeds("xcrun", ["stapler", "validate", artifact], env)) {
     const profile = process.env.AIMONITOR_NOTARY_PROFILE ?? "AIMonitorNotary";
-    run(
+    runWithRetries(
       "xcrun",
       [
         "notarytool",

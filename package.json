@@ -5,7 +5,7 @@
   "description": "AI监控平台桌面版",
   "author": "ManonLoki",
   "private": true,
-  "version": "1.1.0",
+  "version": "2.0.1",
   "type": "module",
   "packageManager": "pnpm@10.30.2",
   "engines": {

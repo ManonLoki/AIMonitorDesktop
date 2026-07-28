@@ -1,6 +1,6 @@
 import { AnimatedContent } from "./reactbits/AnimatedContent";
 import { Icon } from "./Icon";
-import type { MonitorState } from "../types/monitor";
+import { buildImageUrl, type MonitorState } from "../types/monitor";
 
 // 监控画布：按当前 rows × columns 渲染实际可见的宫格（最多 25 个，多余的裁掉不渲染）。
 // 每个宫格展示：图片（若有）、"序号-AI名称-用户名" 表头、正文文案与更新时间。
@@ -20,10 +20,8 @@ export function MonitorCanvas({ state }: { state: MonitorState }) {
       aria-label={`${state.rows} 行 ${state.columns} 列监控宫格`}
     >
       {visible.map((tile, index) => {
-        // 图片由桌面端内置的 HTTP 服务器（src-tauri/src/lib.rs）提供，
-        // 走本机回环地址而非局域网地址，避免受网络环境影响。
         const imageUrl = tile.imageFilename
-          ? `http://127.0.0.1:${state.port}/api/images/${encodeURIComponent(tile.imageFilename)}` // 文件名做 URL 编码，防止特殊字符破坏路径
+          ? buildImageUrl(state.port, tile.imageFilename)
           : undefined; // 没有图片文件名则不渲染 img 标签
         const aiName = tile.aiName.trim() || "AI"; // 空 AI 名称时的占位文案
         const username = tile.username.trim() || "等待数据"; // 空用户名时的占位文案

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-AIMonitorDesktop — a Tauri 2 desktop app (Windows/macOS) that is a 1:1 port of an existing Android app (`/Users/manonloki/Documents/my-work/ai/AiMonitorAndroid`). It shows a 1–5×1–5 grid of tiles (AI name, username, image, content, updated time) and exposes an HTTP API + mDNS/UDP discovery so the Android app (or anything else on the LAN) can push tile updates to it. Product requirements are in `PRODUCT_REQUIREMENTS.md`; hard requirements worth remembering: no dashboard/decoration UI beyond the monitor canvas, and the window maximizes on launch.
+AIMonitorDesktop `2.0.0` — a Tauri 2 desktop app (Windows/macOS) that is a 1:1 port of an existing Android app (`/Users/manonloki/Documents/my-work/ai/AiMonitorAndroid`). Version 2 establishes the multi-native-window architecture with Rust-owned window state and a mutually exclusive lightweight desktop-pet mode. It shows a 1–5×1–5 grid of tiles (AI name, username, image, content, updated time) and exposes an HTTP API + mDNS/UDP discovery so the Android app (or anything else on the LAN) can push tile updates to it. Product requirements are in `PRODUCT_REQUIREMENTS.md`; the frozen pet contract is in `docs/DESKTOP_PET_MODE_DESIGN.md`. With no saved geometry the main window maximizes on first launch; later launches restore the persisted main/pet mode without flashing the other window.
 
 ## Code gate: 400-line file limit
 
@@ -44,10 +44,11 @@ src-tauri/src/
 ├── constants.rs          # shared constants: ports, size limits, API_VERSION
 ├── model.rs               # MonitorTile / MonitorState / WindowGeometry / Preferences (serde structs)
 ├── runtime.rs             # Runtime struct + SharedRuntime, snapshot/save_preferences/changed, load_preferences
-├── commands.rs            # the 5 #[tauri::command] functions — the frontend's only write path
+├── commands.rs            # #[tauri::command] boundary — the frontend's only native write path
 ├── device_info.rs         # default_device_name, local_ipv4
 ├── image.rs                # detect_image, make_gif_loop_forever, safe_image_filename (sync) + probe_image_file (async, tokio::fs) + tests
-├── window_geometry.rs      # rectangles_have_visible_overlap, restore/save window geometry (+ tests)
+├── window_geometry.rs      # restore/save geometry, square pet sizing, DPI/monitor limits (+ tests)
+├── window_manager.rs       # main/pet switching, pet-settings visibility, pet interactions
 ├── discovery.rs            # UDP broadcast discovery, tokio::net::UdpSocket, pure async
 ├── mdns.rs                  # mDNS service registration (start_mdns)
 └── http/
@@ -63,14 +64,16 @@ src-tauri/src/
 
 The HTTP/UDP network layer is pure async by design (Tokio + Axum, no manual threads or blocking sockets) — this is a deliberate architectural choice, not just an implementation detail, so keep new endpoints and socket code on this model rather than reintroducing blocking I/O or manual thread spawning.
 
-Tauri commands (`get_monitor_state`, `set_grid`, `set_image_display_mode`, `set_device_name`, `set_auto_start`, all in `commands.rs`) are the only way the frontend mutates state; every mutation calls `runtime.save_preferences()` (writes `preferences.json` in the app config dir) and `runtime.changed()` (emits a `monitor-state-changed` Tauri event). Window geometry is persisted on move/resize/close and validated against currently attached monitors on restore (`window_geometry::rectangles_have_visible_overlap` — this is what two of the Rust unit tests cover).
+Tauri commands in `commands.rs` are the only way the frontend mutates state. Monitor mutations emit `monitor-state-changed`; mode, layout, focus, size, topmost and lock mutations emit `window-state-changed`. Both paths persist through `Runtime` to `preferences.json`. The fixed native window labels are `main`, `pet`, and `pet-settings`; Rust owns their visibility, mutual exclusion, geometry restoration and failure rollback. Pet geometry stays square above a 24-logical-pixel pager and is constrained per monitor/DPI. Before `pet-settings` is shown, position it in the center of the work area for the monitor currently containing `pet`; do not use the settings window's previous monitor or the global primary monitor as the source of truth.
+
+The tray is mode-specific. In main/dashboard mode it shows `桌宠模式`, `显示看板`, `开机自启`, `退出`, in that order. In pet mode it shows `看板模式`, `锁定桌宠`, `开机自启`, `退出`. Hide inapplicable items instead of leaving the pet lock disabled in dashboard mode.
 
 **The frontend has no router, server-state library, or global client-state store — it doesn't need one.** The whole app is one Rust-driven data source fanned out to a few components:
 
 - `src/types/monitor.ts` — shared types (`MonitorState`, `MonitorTile`, `ImageDisplayMode`) mirroring the Rust structs field-for-field (serde converts `snake_case` → `camelCase`).
-- `src/hooks/useMonitorState.ts` — the single data source. Calls `get_monitor_state` once on mount, then re-fetches on the `monitor-state-changed` Tauri event. There is no local optimistic state; every mutation goes Rust → event → refetch.
+- `src/hooks/useMonitorState.ts` and `src/hooks/useWindowState.ts` — the two read models over the same Rust `Runtime`. They call `get_monitor_state` / `get_window_state` and re-fetch from the corresponding Tauri event. There is no local optimistic state; every mutation goes Rust → event → refetch.
 - `src/components/Icon.tsx`, `MonitorCanvas.tsx`, `SettingsPanel.tsx` — presentational pieces. `MonitorCanvas` renders the tile grid (images fetched from `http://127.0.0.1:{port}/api/images/{filename}`); `SettingsPanel` is the only place that calls the mutating Tauri commands.
-- `src/MonitorApp.tsx` — composition root (sidebar nav + workspace), rendered directly by `src/main.tsx`. Switching between "monitor" and "settings" is local `useState`, not a route.
+- `src/MonitorApp.tsx`, `src/PetApp.tsx`, and `src/PetSettingsApp.tsx` — composition roots selected by the window URL's `view` query in `src/main.tsx`; this is not a client router. `PetContextMenu` contains reusable settings controls despite its historical component name.
 - `src/components/reactbits/` — hand-maintained React Bits animation components (`AnimatedContent`, `SpotlightCard`) adapted for desktop and `prefers-reduced-motion` — see `THIRD_PARTY_NOTICES.md` for upstream licensing. Extend these in place rather than pulling the upstream package.
 
 All Chinese UI copy must match the existing Android app's wording per the product requirements.

@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import { useState } from "react";
 import { AnimatedContent } from "./components/reactbits/AnimatedContent";
 import { Icon } from "./components/Icon";
@@ -56,6 +57,13 @@ export function MonitorApp() {
             <span>设置</span>
           </button>
         </nav>
+        <div className="mode-switch">
+          <small>显示模式</small>
+          <button title="切换到桌宠模式" onClick={() => void invoke("switch_app_mode", { mode: "pet" })}>
+            <Icon name="pet" />
+            <span>桌宠模式</span>
+          </button>
+        </div>
         <div className="server-indicator">
           {/* HTTP 服务是否已完成绑定，绿点/文案随之切换 */}
           <i className={state.isServerRunning ? "online" : ""} />

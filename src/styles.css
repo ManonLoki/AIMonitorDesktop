@@ -29,20 +29,27 @@ svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width:
 .brand strong { color: #f5f7fb; font-size: 14px; }
 .brand small { margin-top: 3px; color: #7f899c; font-size: 11px; }
 nav { display: grid; gap: 6px; margin-top: 18px; }
-nav button { display: flex; gap: 12px; align-items: center; width: 100%; padding: 11px 12px; border: 0; border-radius: 10px; color: #8993a5; background: transparent; cursor: pointer; transition: color .18s ease, background-color .18s ease, transform .22s cubic-bezier(.22, 1, .36, 1); }
+nav button, .mode-switch button { display: flex; gap: 12px; align-items: center; width: 100%; padding: 11px 12px; border-radius: 10px; cursor: pointer; }
+nav button span, .mode-switch button span { font-weight: 600; }
+nav button { border: 0; color: #8993a5; background: transparent; transition: color .18s ease, background-color .18s ease, transform .22s cubic-bezier(.22, 1, .36, 1); }
 nav button:hover { color: #e8ecf4; background: #1a1e27; transform: translateX(2px); }
 nav button.active { color: #eaf0ff; background: #253457; }
 nav button:active { transform: scale(.97); }
-nav button span { font-size: 14px; font-weight: 600; }
+nav button span { font-size: 14px; }
+.mode-switch { display: grid; gap: 6px; margin-top: auto; padding-top: 14px; border-top: 1px solid #242833; }
+.mode-switch small { padding: 0 12px; color: #626c7d; font-size: 10px; }
+.mode-switch button { border: 1px solid #2b3342; color: #a9b4c7; background: #171b23; }
+.mode-switch button:hover { color: #eef3ff; border-color: #3b4b69; background: #1c2432; }
+.mode-switch button span { font-size: 13px; }
 .sidebar-toggle { position: absolute; z-index: 2; top: 59px; right: -13px; display: grid; width: 26px; height: 26px; padding: 0; place-items: center; border: 1px solid #323846; border-radius: 8px; color: #aeb6c5; background: #181c24; box-shadow: 0 3px 10px rgba(0,0,0,.28); cursor: pointer; transition: color .18s ease, background-color .18s ease, transform .25s cubic-bezier(.22, 1, .36, 1); }
 .sidebar-toggle:hover { color: #fff; background: #252b36; }
 .sidebar-toggle:active { transform: scale(.9); }
 .sidebar-toggle svg { width: 15px; height: 15px; }
 .sidebar.collapsed .brand { justify-content: center; padding-inline: 0; }
-.sidebar.collapsed .brand-copy, .sidebar.collapsed nav button span, .sidebar.collapsed .server-indicator span { display: none; }
-.sidebar.collapsed nav button { justify-content: center; width: 50px; padding-inline: 0; }
+.sidebar.collapsed .brand-copy, .sidebar.collapsed nav button span, .sidebar.collapsed .mode-switch small, .sidebar.collapsed .mode-switch button span, .sidebar.collapsed .server-indicator span { display: none; }
+.sidebar.collapsed nav button, .sidebar.collapsed .mode-switch button { justify-content: center; width: 50px; padding-inline: 0; }
 .sidebar.collapsed .server-indicator { justify-content: center; }
-.server-indicator { display: flex; gap: 8px; align-items: center; margin-top: auto; padding: 9px 10px; color: #7f899c; font-size: 11px; }
+.server-indicator { display: flex; gap: 8px; align-items: center; margin-top: 6px; padding: 9px 10px; color: #7f899c; font-size: 11px; }
 .server-indicator i { width: 7px; height: 7px; border-radius: 50%; background: #7f899c; transition: background-color .3s ease, box-shadow .3s ease; }
 .server-indicator i.online { background: #32c48d; box-shadow: 0 0 0 4px rgba(50,196,141,.1); }
 .workspace { min-width: 0; flex: 1; height: 100%; overflow: hidden; }

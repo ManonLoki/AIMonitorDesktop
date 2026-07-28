@@ -19,7 +19,7 @@ dependencies = [
 
 [[package]]
 name = "aimonitor-desktop"
-version = "1.1.0"
+version = "2.0.1"
 dependencies = [
  "axum",
  "mdns-sd",
@@ -30,6 +30,8 @@ dependencies = [
  "tauri-plugin-autostart",
  "tauri-plugin-opener",
  "tauri-plugin-single-instance",
+ "tauri-runtime",
+ "tempfile",
  "tokio",
  "tower-http 0.7.0",
  "uuid",

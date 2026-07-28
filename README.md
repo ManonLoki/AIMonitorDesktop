@@ -2,6 +2,8 @@
 
 AI监控平台桌面版，由 ManonLoki 开发。
 
+当前版本：`2.0.0`。本版本以多原生窗口、Rust 统一窗口状态和桌宠模式为新架构基线。
+
 局域网 HTTP API 当前为 v3。槽位更新必须携带控制端 `clientId`，并通过
 `POST /api/clients/{clientId}/heartbeat` 每 30 秒续租；连续 2 分钟未续租时，
 桌面端只清理该控制端拥有的宫格。
@@ -19,6 +21,31 @@ AI监控平台桌面版，由 ManonLoki 开发。
 ![AIMonitorDesktop macOS 设置界面](./docs/screenshots/settings.jpg)
 
 > 可配置开机自启、设备名称、监控宫格和画布图片显示方式，并查看局域网服务信息。
+
+### 桌宠界面
+
+![AIMonitorDesktop macOS 桌宠模式](./docs/screenshots/desktop-pet.jpg)
+
+> 桌宠模式将监控角色以透明、无边框窗口常驻桌面，并提供循环分页与快捷模式切换。
+
+## 桌宠模式
+
+桌宠模式是主监控界面的轻量桌面展示形态，直接复用监控槽位中的角色图片和
+Rust 运行时状态，不改变局域网 API 或 25 个槽位的协议。
+
+- 主界面与桌宠窗口互斥显示，切换或重启后恢复上次模式。
+- 支持 `1×1` 单宠和 `2×2` 四宠布局，按当前监控行列分页并首尾循环。
+- 普通滚轮翻页，`Ctrl/Command + 滚轮`缩放，双击非控制区域返回主界面。
+- 右键打开独立桌宠设置窗口；窗口在桌宠当前所在显示器居中，可调整布局、连续
+  尺寸、始终置顶和位置锁定。
+- 桌宠画布保持正方形；底部分页条固定为 24 逻辑像素，不计入画布尺寸。
+- 尺寸按当前显示器工作区与 DPI 动态限制，跨显示器时自动收敛到可操作范围。
+- 主窗口、单宠布局和四宠布局分别持久化几何状态；隐藏窗口不会停止后台服务。
+- 托盘菜单随模式精简：看板模式依次提供“桌宠模式 / 显示看板”，桌宠模式依次
+  提供“看板模式 / 锁定桌宠”；两种模式均保留“开机自启 / 退出”。
+
+完整且已冻结的交互、窗口、持久化与验收基线见
+[桌宠模式设计](./docs/DESKTOP_PET_MODE_DESIGN.md)。
 
 ## 技术栈
 
@@ -110,8 +137,9 @@ xcrun notarytool history --keychain-profile AIMonitorNotary
 
 ### 每次发布
 
-1. 同步修改 `package.json`、`src-tauri/Cargo.toml` 和
-   `src-tauri/tauri.conf.json` 中的版本号，三处必须一致。
+1. 同步修改 `package.json`、`src-tauri/Cargo.toml`、
+   `src-tauri/Cargo.lock` 和 `src-tauri/tauri.conf.json` 中的版本号；三个版本源
+   必须一致，Cargo 锁文件中的根包版本也必须同步。
 2. 提交发布前先执行完整检查：
 
    ```bash

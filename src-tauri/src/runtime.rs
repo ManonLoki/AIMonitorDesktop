@@ -4,13 +4,18 @@
 use crate::constants::FIRST_HTTP_PORT;
 use crate::device_info::{default_device_name, local_ipv4};
 use crate::heartbeat::ClientLeases;
-use crate::model::{MonitorState, MonitorTile, Preferences, WindowGeometry};
+use crate::model::{MonitorState, MonitorTile, Preferences, WindowPreferences, WindowState};
 use std::{
     fs,
+    io::Write,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, RwLock},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, Mutex, RwLock,
+    },
+    time::Duration,
 };
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_autostart::ManagerExt;
 use uuid::Uuid;
 
@@ -21,7 +26,8 @@ pub(crate) struct Runtime {
     pub(crate) state: RwLock<MonitorState>,
     pub(crate) image_dir: PathBuf, // 图片文件落盘目录（应用缓存目录下）
     preferences_path: PathBuf,     // preferences.json 的完整路径，只在本文件内使用
-    pub(crate) window_geometry: Mutex<Option<WindowGeometry>>, // 待落盘的最新窗口几何
+    pub(crate) windows: Mutex<WindowPreferences>, // 主窗口与桌宠窗口的独立持久化状态
+    save_generation: AtomicU64,    // 移动/缩放写盘防抖代次
     pub(crate) client_leases: Mutex<ClientLeases>, // 控制端心跳租约，跨 HTTP 请求共享
     pub(crate) app: AppHandle,     // 用于向前端发送事件、访问自启动插件
 }
@@ -36,10 +42,14 @@ impl Runtime {
         app: AppHandle,
         image_dir: PathBuf,
         preferences_path: PathBuf,
-        preferences: Preferences,
+        mut preferences: Preferences,
         auto_start: bool,
         app_version: String,
     ) -> SharedRuntime {
+        // 旧版只有顶层 window 字段，首次加载时无损迁移到 mainWindow.normalGeometry。
+        if preferences.windows.main_window.normal_geometry.is_none() {
+            preferences.windows.main_window.normal_geometry = preferences.window.take();
+        }
         Arc::new(Self {
             state: RwLock::new(MonitorState {
                 rows: preferences.rows.clamp(1, 5), // 防御性 clamp：即便偏好文件被手工改坏也不会越界
@@ -57,7 +67,8 @@ impl Runtime {
             }),
             image_dir,
             preferences_path,
-            window_geometry: Mutex::new(preferences.window), // 初始值来自历史偏好，之后由窗口事件持续更新
+            windows: Mutex::new(preferences.windows),
+            save_generation: AtomicU64::new(0),
             client_leases: Mutex::new(ClientLeases::default()),
             app,
         })
@@ -76,20 +87,67 @@ impl Runtime {
             columns: state.columns,
             image_display_mode: state.image_display_mode,
             auto_start: state.auto_start,
-            window: self
-                .window_geometry
+            windows: self
+                .windows
                 .lock()
-                .expect("window geometry lock poisoned")
-                .clone(), // 单独加锁读取窗口几何，与 state 锁互不干扰
+                .expect("window state lock poisoned")
+                .clone(),
+            window: None,
             device_id: state.device_id,
             device_name: state.device_name,
         };
         if let Some(parent) = self.preferences_path.parent() {
             let _ = fs::create_dir_all(parent); // 确保配置目录存在（首次启动时可能还未创建）
         }
-        if let Ok(bytes) = serde_json::to_vec_pretty(&preferences) {
-            let _ = fs::write(&self.preferences_path, bytes); // 序列化失败或写盘失败都静默忽略，不影响主流程
+        if let (Ok(bytes), Some(parent)) = (
+            serde_json::to_vec_pretty(&preferences),
+            self.preferences_path.parent(),
+        ) {
+            // 同目录临时文件 + persist：Unix 使用 rename，Windows 使用 ReplaceFile，
+            // 避免异常退出留下半截 preferences.json。
+            if let Ok(mut temp) = tempfile::NamedTempFile::new_in(parent) {
+                if temp.write_all(&bytes).is_ok() && temp.as_file().sync_all().is_ok() {
+                    let _ = temp.persist(&self.preferences_path);
+                }
+            }
         }
+    }
+
+    /// 窗口移动/缩放会产生高频事件；只让最后一次事件在 400ms 后真正写盘。
+    pub(crate) fn save_preferences_debounced(self: &Arc<Self>) {
+        let generation = self.save_generation.fetch_add(1, Ordering::Relaxed) + 1;
+        let runtime = self.clone();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(400)).await;
+            if runtime.save_generation.load(Ordering::Relaxed) == generation {
+                runtime.save_preferences();
+            }
+        });
+    }
+
+    // pet_size_min/max 依赖当前显示器，只有拿到桌宠窗口句柄才能算准；
+    // 算不到时回退到 pet_geometry 里唯一的兜底值，而不是在这里再写一份。
+    pub(crate) fn window_snapshot(&self) -> WindowState {
+        let (active_mode, pet_window) = {
+            let windows = self.windows.lock().expect("window state lock poisoned");
+            (windows.active_mode, windows.pet_window.clone()) // clone 完立刻释放锁，再去查窗口句柄
+        };
+        // 拿不到桌宠窗口句柄（理论上不会发生，三个窗口在 setup 里就创建好了）时用兜底区间；
+        // 拿得到就按它当前所在的显示器精确计算允许的尺寸范围。
+        let (pet_size_min, pet_size_max) = self.app.get_webview_window("pet").map_or_else(
+            || crate::pet_geometry::pet_size_range_fallback(pet_window.layout),
+            |window| crate::pet_geometry::pet_size_range(&window, pet_window.layout),
+        );
+        WindowState {
+            active_mode,
+            pet_window,
+            pet_size_min,
+            pet_size_max,
+        }
+    }
+
+    pub(crate) fn window_changed(&self) {
+        let _ = self.app.emit("window-state-changed", ());
     }
 
     // 通知前端状态已变化；前端收到后会重新调用 get_monitor_state 拉取最新快照。
@@ -130,8 +188,9 @@ pub(crate) fn load_preferences(path: &Path) -> Preferences {
             columns: 2,                                                    // 默认 2 列
             image_display_mode: crate::model::ImageDisplayMode::default(), // 默认等比缩放
             auto_start: false,                                             // 默认不开机自启
-            window: None, // 默认无历史窗口几何，交给 restore_window 走最大化兜底
+            windows: WindowPreferences::default(),
+            window: None,
             device_id: Uuid::new_v4().to_string(), // 首次启动生成一个新的随机设备 ID
-            device_name: default_device_name(), // 首次启动用主机名作为默认设备名
+            device_name: default_device_name(),    // 首次启动用主机名作为默认设备名
         })
 }
