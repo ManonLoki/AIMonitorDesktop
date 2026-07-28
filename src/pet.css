@@ -76,10 +76,10 @@ html.pet-window, html.pet-window body, html.pet-window #root {
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  padding: 1px 2px;
+  padding: clamp(1px, .8vmin, 4px);
   overflow: hidden;
   color: #fff;
-  font-size: 8px;
+  font-size: clamp(5px, 2.5vmin, 12px);
   line-height: 1.1;
   pointer-events: none;
   text-shadow: 0 1px 2px rgba(0,0,0,.95), 0 0 3px rgba(0,0,0,.8);
@@ -90,6 +90,7 @@ html.pet-window, html.pet-window body, html.pet-window #root {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.pet-labels span { font-size: .9em; }
 
 .pet-pager {
   z-index: 20;
@@ -108,8 +109,8 @@ html.pet-window, html.pet-window body, html.pet-window #root {
 
 .pet-pager button {
   display: grid;
-  width: 20px;
-  height: 20px;
+  width: clamp(14px, 6vmin, 20px);
+  height: clamp(14px, 6vmin, 20px);
   padding: 0;
   place-items: center;
   border: 0;
@@ -117,12 +118,12 @@ html.pet-window, html.pet-window body, html.pet-window #root {
   color: white;
   background: transparent;
   cursor: pointer;
-  font-size: 16px;
+  font-size: clamp(11px, 5vmin, 16px);
   line-height: 1;
 }
 .pet-pager button:hover { background: rgba(255,255,255,.14); }
 .pet-pager button:disabled { opacity: .32; cursor: default; }
-.pet-pager span { min-width: 18px; color: rgba(255,255,255,.76); font-size: 9px; text-align: center; }
+.pet-pager span { min-width: clamp(14px, 6vmin, 18px); color: rgba(255,255,255,.76); font-size: clamp(7px, 2.8vmin, 9px); text-align: center; }
 
 .pet-context-menu {
   position: fixed;

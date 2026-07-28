@@ -28,11 +28,10 @@ pub(crate) fn pet_size_range_for_monitor(monitor: &Monitor, layout: PetLayout) -
     (min, max.max(min)) // 显示器很小时 max 可能被 pet_canvas_min 顶到比理论最大值还小，这里保证 max >= min
 }
 
-// 单宫格布局最多占最短边的 1/4，2×2 宫格布局每格占其 1/2（即整体最多占最短边）；
-// 这两个比例是产品侧定的视觉上限，测试 limits_pet_to_one_quarter_of_the_logical_shortest_edge 锁定了它们。
+// 两种布局的整体窗口共用同一个视觉上限：当前显示器工作区逻辑短边的 1/2。
+// 布局只影响最小值，不应让 1×1 的滑杆和窗口上限被额外砍半。
 fn maximum_pet_size(shortest_physical: u32, scale_factor: f64, layout: PetLayout) -> u16 {
-    let divisor = if layout == PetLayout::Grid { 2.0 } else { 4.0 };
-    (f64::from(shortest_physical) / scale_factor / divisor)
+    (f64::from(shortest_physical) / scale_factor / 2.0)
         .floor()
         .max(f64::from(pet_canvas_min(layout))) as u16
 }
@@ -208,9 +207,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn limits_pet_to_one_quarter_of_the_logical_shortest_edge() {
-        assert_eq!(maximum_pet_size(1_080, 1.0, PetLayout::Single), 270);
-        assert_eq!(maximum_pet_size(1_080, 2.0, PetLayout::Single), 135);
+    fn layouts_share_half_of_the_logical_shortest_edge_as_their_maximum() {
+        assert_eq!(maximum_pet_size(1_080, 1.0, PetLayout::Single), 540);
+        assert_eq!(maximum_pet_size(1_080, 2.0, PetLayout::Single), 270);
         assert_eq!(maximum_pet_size(1_080, 1.0, PetLayout::Grid), 540);
         assert_eq!(logical_pet_window_size(64), LogicalSize::new(64.0, 88.0));
         assert_eq!(logical_pet_window_size(256), LogicalSize::new(256.0, 280.0));
