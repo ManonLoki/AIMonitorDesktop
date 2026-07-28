@@ -53,14 +53,14 @@ fn sync_mode_items(
     let is_main = mode == AppMode::Main;
     let _ = show_window.set_text("显示看板");
     let _ = switch_mode.set_text(if is_main {
-        "切换桌宠"
+        "桌宠模式"
     } else {
-        "切换看板"
+        "看板模式"
     });
     let _ = menu.remove(show_window);
     let _ = menu.remove(pet_locked);
     if is_main {
-        let _ = menu.insert(show_window, 0);
+        let _ = menu.insert(show_window, 1);
     } else {
         let _ = menu.insert(pet_locked, 1);
     }
@@ -81,7 +81,7 @@ pub fn setup(
     auto_start_enabled: bool,
 ) -> tauri::Result<TrayMenu> {
     let show_window = MenuItem::with_id(app, SHOW_WINDOW_MENU_ID, "显示看板", true, None::<&str>)?;
-    let switch_mode = MenuItem::with_id(app, SWITCH_MODE_MENU_ID, "切换桌宠", true, None::<&str>)?;
+    let switch_mode = MenuItem::with_id(app, SWITCH_MODE_MENU_ID, "桌宠模式", true, None::<&str>)?;
     let auto_start = CheckMenuItem::with_id(
         app,
         AUTO_START_MENU_ID,

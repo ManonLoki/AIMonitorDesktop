@@ -66,7 +66,7 @@ The HTTP/UDP network layer is pure async by design (Tokio + Axum, no manual thre
 
 Tauri commands in `commands.rs` are the only way the frontend mutates state. Monitor mutations emit `monitor-state-changed`; mode, layout, focus, size, topmost and lock mutations emit `window-state-changed`. Both paths persist through `Runtime` to `preferences.json`. The fixed native window labels are `main`, `pet`, and `pet-settings`; Rust owns their visibility, mutual exclusion, geometry restoration and failure rollback. Pet geometry stays square above a 24-logical-pixel pager and is constrained per monitor/DPI. Before `pet-settings` is shown, position it in the center of the work area for the monitor currently containing `pet`; do not use the settings window's previous monitor or the global primary monitor as the source of truth.
 
-The tray is mode-specific. In main/dashboard mode it shows `显示看板`, `切换桌宠`, `开机自启`, `退出`. In pet mode it shows `切换看板`, `锁定桌宠`, `开机自启`, `退出`. Hide inapplicable items instead of leaving the pet lock disabled in dashboard mode.
+The tray is mode-specific. In main/dashboard mode it shows `桌宠模式`, `显示看板`, `开机自启`, `退出`, in that order. In pet mode it shows `看板模式`, `锁定桌宠`, `开机自启`, `退出`. Hide inapplicable items instead of leaving the pet lock disabled in dashboard mode.
 
 **The frontend has no router, server-state library, or global client-state store — it doesn't need one.** The whole app is one Rust-driven data source fanned out to a few components:
 
