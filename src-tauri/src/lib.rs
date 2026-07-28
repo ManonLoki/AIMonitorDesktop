@@ -91,6 +91,9 @@ pub fn run() {
             );
             runtime.save_preferences(); // 首次落盘，规范化/补全可能缺失的字段
             let tray_menu = tray::setup(app, runtime.clone(), auto_start)?; // 创建托盘菜单并绑定共享状态
+            // 三个窗口共用同一套事件回调：这里本身不知道、也不关心哪个 label 是桌宠——
+            // handle_window_resized/handle_window_moved 内部才按 label 判断要不要跑桌宠专属逻辑，
+            // 保证以后新增第四个窗口时这段循环不用改。
             for label in ["main", "pet", "pet-settings"] {
                 let Some(window) = app.get_webview_window(label) else {
                     continue;
@@ -100,14 +103,14 @@ pub fn run() {
                 window.on_window_event(move |event| {
                     if let WindowEvent::Resized(size) = event {
                         handle_window_resized(&window_for_events, *size, &runtime_for_events);
-                        save_window_state(&window_for_events, &runtime_for_events, false);
+                        save_window_state(&window_for_events, &runtime_for_events, false); // false=防抖写盘，resize 是高频事件
                     } else if matches!(event, WindowEvent::Moved(_)) {
                         handle_window_moved(&window_for_events, &runtime_for_events);
                         save_window_state(&window_for_events, &runtime_for_events, false);
                     }
                     if let WindowEvent::CloseRequested { api, .. } = event {
-                        save_window_state(&window_for_events, &runtime_for_events, true);
-                        api.prevent_close();
+                        save_window_state(&window_for_events, &runtime_for_events, true); // true=立即落盘，关闭前必须保证写入成功
+                        api.prevent_close(); // 阻止真正关闭：这三个窗口只隐藏不销毁，托盘/再次打开时复用
                         let _ = window_for_events.hide();
                     }
                 });

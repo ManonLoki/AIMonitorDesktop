@@ -13,6 +13,7 @@ const MAIN_LABEL: &str = "main";
 const PET_LABEL: &str = "pet";
 const PET_SETTINGS_LABEL: &str = "pet-settings";
 
+// 本文件几乎每个函数都要加这把锁；统一成一个助手，出错时的提示文案也只维护一处。
 fn windows_lock(runtime: &SharedRuntime) -> Result<MutexGuard<'_, WindowPreferences>, String> {
     runtime
         .windows
@@ -25,11 +26,13 @@ pub(crate) fn clamp_focused_slot(slot: u8, rows: u8, columns: u8) -> u8 {
     slot.min(rows.saturating_mul(columns).max(1) - 1)
 }
 
+// 桌宠相关的写操作几乎都以“落盘 + 广播 window-state-changed”收尾，抽成一个助手。
 fn commit(runtime: &SharedRuntime) {
     runtime.save_preferences();
     runtime.window_changed();
 }
 
+// 模式 → 对应的固定窗口 label，Tauri 侧按 label 查找/操作窗口都要经过这一层映射。
 fn label_for_mode(mode: AppMode) -> &'static str {
     match mode {
         AppMode::Main => MAIN_LABEL,
@@ -37,6 +40,7 @@ fn label_for_mode(mode: AppMode) -> &'static str {
     }
 }
 
+// 取当前布局对应的已保存几何（single/grid 各自独立一份），恢复窗口位置时用。
 fn pet_geometry(preferences: &PetWindowPreferences) -> Option<&crate::model::WindowGeometry> {
     match preferences.layout {
         PetLayout::Single => preferences.single_geometry.as_ref(),
@@ -44,6 +48,8 @@ fn pet_geometry(preferences: &PetWindowPreferences) -> Option<&crate::model::Win
     }
 }
 
+// 把目标模式的窗口按保存的偏好恢复到位（位置/尺寸/置顶等），但不负责显示/隐藏——
+// show/hide 时机由调用方（show_active_window / switch_mode）决定，方便切换失败时回滚。
 fn prepare_window(
     app: &AppHandle,
     runtime: &SharedRuntime,
@@ -52,7 +58,7 @@ fn prepare_window(
     let window = app
         .get_webview_window(label_for_mode(mode))
         .ok_or_else(|| "目标窗口不存在".to_string())?;
-    let windows = windows_lock(runtime)?.clone();
+    let windows = windows_lock(runtime)?.clone(); // clone 出来后立刻释放锁，恢复窗口的过程不需要一直持锁
     match mode {
         AppMode::Main => restore_main_window(&window, &windows.main_window),
         AppMode::Pet => {
@@ -71,6 +77,8 @@ fn prepare_window(
     Ok(window)
 }
 
+// 单实例二次启动 / 托盘“显示看板”时调用：不切模式，只是把当前活动模式对应的
+// 窗口恢复位置、取消最小化、显示并聚焦。
 pub(crate) fn show_active_window(app: &AppHandle, runtime: &SharedRuntime) -> Result<(), String> {
     let mode = windows_lock(runtime)?.active_mode;
     let window = prepare_window(app, runtime, mode)?;
@@ -79,6 +87,9 @@ pub(crate) fn show_active_window(app: &AppHandle, runtime: &SharedRuntime) -> Re
     window.set_focus().map_err(|error| error.to_string())
 }
 
+// 主窗口 ⇄ 桌宠模式切换，两个窗口互斥（同一时刻只显示一个）。
+// 步骤：保存旧窗口当前状态 → 恢复新窗口到位 → 隐藏旧窗口/设置窗口 → 显示新窗口；
+// 显示新窗口失败时把旧窗口重新显示出来，避免切换失败后界面上什么都看不见。
 pub(crate) fn switch_mode(
     app: &AppHandle,
     runtime: &SharedRuntime,
@@ -86,15 +97,15 @@ pub(crate) fn switch_mode(
 ) -> Result<(), String> {
     let source_mode = windows_lock(runtime)?.active_mode;
     if source_mode == target {
-        return show_active_window(app, runtime);
+        return show_active_window(app, runtime); // 目标就是当前模式，退化成普通的显示
     }
     let source = app.get_webview_window(label_for_mode(source_mode));
     if let Some(source) = source.as_ref() {
-        capture_window_state(source, runtime);
+        capture_window_state(source, runtime); // 切走前先记住旧窗口的位置，下次切回来能恢复
     }
     let target_window = prepare_window(app, runtime, target)?;
     if let Some(settings) = app.get_webview_window(PET_SETTINGS_LABEL) {
-        let _ = settings.hide();
+        let _ = settings.hide(); // 桌宠设置窗口只在桌宠模式下有意义，切走时一并隐藏
     }
     if let Some(source) = source.as_ref() {
         source.hide().map_err(|error| error.to_string())?;
@@ -104,6 +115,7 @@ pub(crate) fn switch_mode(
         .and_then(|_| target_window.set_focus())
         .map_err(|error| error.to_string());
     if let Err(error) = show_result {
+        // 新窗口显示失败：把旧窗口显示回来，不留下“两个窗口都不可见”的状态。
         if let Some(source) = source {
             let _ = source.show();
             let _ = source.set_focus();
@@ -115,6 +127,7 @@ pub(crate) fn switch_mode(
     Ok(())
 }
 
+// 托盘“退出”/关闭快捷键触发：只隐藏当前活动窗口（不退出进程，行为等同点关闭按钮）。
 pub(crate) fn hide_active_window(app: &AppHandle, runtime: &SharedRuntime) -> Result<(), String> {
     let mode = windows_lock(runtime)?.active_mode;
     let window = app
@@ -125,6 +138,8 @@ pub(crate) fn hide_active_window(app: &AppHandle, runtime: &SharedRuntime) -> Re
     window.hide().map_err(|error| error.to_string())
 }
 
+// 打开桌宠右键菜单对应的独立设置窗口：每次都重新居中到“桌宠当前所在显示器”的工作区，
+// 而不是设置窗口自己上次的位置或全局主显示器——桌宠可能被拖到了副屏，设置窗口要跟过去。
 pub(crate) fn show_pet_settings(app: &AppHandle) -> Result<(), String> {
     let pet = app
         .get_webview_window(PET_LABEL)
@@ -139,6 +154,7 @@ pub(crate) fn show_pet_settings(app: &AppHandle) -> Result<(), String> {
         .ok_or_else(|| "桌宠设置窗口不存在".to_string())?;
     let area = monitor.work_area();
     let size = window.outer_size().map_err(|error| error.to_string())?;
+    // 居中公式：工作区起点 + (工作区尺寸 - 窗口尺寸) / 2；用 i64 避免中间结果溢出 i32。
     let x = i64::from(area.position.x)
         + (i64::from(area.size.width).saturating_sub(i64::from(size.width)) / 2);
     let y = i64::from(area.position.y)
@@ -150,6 +166,7 @@ pub(crate) fn show_pet_settings(app: &AppHandle) -> Result<(), String> {
     window.set_focus().map_err(|error| error.to_string())
 }
 
+// 关闭桌宠设置窗口（右上角 × 按钮 / 点击桌宠外部区域触发），只隐藏不销毁。
 pub(crate) fn hide_pet_settings(app: &AppHandle) -> Result<(), String> {
     app.get_webview_window(PET_SETTINGS_LABEL)
         .ok_or_else(|| "桌宠设置窗口不存在".to_string())?
@@ -157,6 +174,9 @@ pub(crate) fn hide_pet_settings(app: &AppHandle) -> Result<(), String> {
         .map_err(|error| error.to_string())
 }
 
+// 单宫格 ⇄ 2×2 宫格切换。用当前窗口位置作为锚点（见下面注释），并把该布局上次
+// 保存的尺寸夹到新布局允许的区间；恢复窗口几何失败时把内存状态回滚，
+// 避免“落盘的偏好”和“窗口实际状态”不一致。
 pub(crate) fn set_pet_layout(
     app: &AppHandle,
     runtime: &SharedRuntime,
@@ -165,16 +185,16 @@ pub(crate) fn set_pet_layout(
     let window = app
         .get_webview_window(PET_LABEL)
         .ok_or_else(|| "桌宠窗口不存在".to_string())?;
-    capture_window_state(&window, runtime);
+    capture_window_state(&window, runtime); // 记住切换前的位置，作为下面的锚点用
     let mut preferences = windows_lock(runtime)?.pet_window.clone();
-    let previous_layout = preferences.layout;
+    let previous_layout = preferences.layout; // 恢复失败时回滚用
     let previous_size = preferences.pet_size;
     // 切换布局时以当前窗口左上角为锚点；不要跳回该布局上一次保存的位置。
     // restore_pet_window 只会在新尺寸越过工作区右侧/下侧时把位置向内收敛。
     let current_geometry = pet_geometry(&preferences).cloned();
     preferences.layout = layout;
     let (min, max) = crate::pet_geometry::pet_size_range(&window, layout);
-    preferences.pet_size = preferences.pet_size.clamp(min, max);
+    preferences.pet_size = preferences.pet_size.clamp(min, max); // 旧尺寸可能超出新布局允许的区间
     {
         let mut windows = windows_lock(runtime)?;
         windows.pet_window.layout = layout;
@@ -186,6 +206,7 @@ pub(crate) fn set_pet_layout(
         layout,
         preferences.pet_size,
     ) {
+        // 窗口没能恢复成功：把内存状态改回切换前的值，不留下半切换状态。
         let mut windows = windows_lock(runtime)?;
         windows.pet_window.layout = previous_layout;
         windows.pet_window.pet_size = previous_size;
@@ -195,6 +216,7 @@ pub(crate) fn set_pet_layout(
     Ok(())
 }
 
+// 桌宠翻页 / 主窗口宫格数变化后，把 focused_slot 收敛到新宫格范围内（见 clamp_focused_slot）。
 pub(crate) fn set_pet_focused_slot(runtime: &SharedRuntime, slot: u8) -> Result<(), String> {
     let (rows, columns) = {
         let state = runtime.state.read().map_err(|_| "状态不可用")?;
@@ -205,6 +227,7 @@ pub(crate) fn set_pet_focused_slot(runtime: &SharedRuntime, slot: u8) -> Result<
     Ok(())
 }
 
+// 先调用 OS API 生效，成功了才更新内存状态并落盘——避免“偏好里记着开，实际窗口没置顶”。
 pub(crate) fn set_pet_always_on_top(
     app: &AppHandle,
     runtime: &SharedRuntime,
@@ -219,12 +242,15 @@ pub(crate) fn set_pet_always_on_top(
     Ok(())
 }
 
+// 锁定桌宠：锁定后拖拽/滚轮缩放会被 start_pet_drag / resize_pet_by 直接短路。
 pub(crate) fn set_pet_locked(runtime: &SharedRuntime, locked: bool) -> Result<(), String> {
     windows_lock(runtime)?.pet_window.locked = locked;
     commit(runtime);
     Ok(())
 }
 
+// 桌宠设置面板里的尺寸滑杆调用：显式校验请求值落在当前显示器允许的区间内，
+// 越界直接拒绝（而不是静默 clamp），让前端能感知到无效输入。
 pub(crate) fn set_pet_size(
     app: &AppHandle,
     runtime: &SharedRuntime,
@@ -238,19 +264,21 @@ pub(crate) fn set_pet_size(
     if !(min..=max).contains(&size) {
         return Err(format!("桌宠大小必须在 {min}–{max} 像素之间"));
     }
-    apply_pet_constraints(&window, layout).map_err(|error| error.to_string())?;
+    apply_pet_constraints(&window, layout).map_err(|error| error.to_string())?; // 同步 OS 级别的 min/max，避免下面 set_size 被系统钳制成别的值
     window
         .set_size(LogicalSize::new(
             f64::from(size),
-            f64::from(size + PET_PAGER_HEIGHT),
+            f64::from(size + PET_PAGER_HEIGHT), // 窗口高度 = 画布 + 底部翻页条
         ))
         .map_err(|error| error.to_string())?;
     windows_lock(runtime)?.pet_window.pet_size = size;
-    capture_window_state(&window, runtime);
+    capture_window_state(&window, runtime); // set_size 后窗口位置可能因为工作区收敛而变化，一并记下来
     commit(runtime);
     Ok(())
 }
 
+// Ctrl/Cmd + 滚轮缩放：在当前尺寸基础上加一个增量，而不是直接设定绝对值，
+// 所以要先读窗口的实际当前尺寸（而非偏好里存的值，两者理论一致但以窗口为准更保险）。
 pub(crate) fn resize_pet_by(
     app: &AppHandle,
     runtime: &SharedRuntime,
@@ -261,7 +289,7 @@ pub(crate) fn resize_pet_by(
         (windows.pet_window.layout, windows.pet_window.locked)
     };
     if locked {
-        return Ok(());
+        return Ok(()); // 锁定状态下静默忽略，不报错——用户滚轮误触不应该弹错误提示
     }
     let window = app
         .get_webview_window(PET_LABEL)
@@ -271,7 +299,7 @@ pub(crate) fn resize_pet_by(
         window
             .inner_size()
             .map_err(|error| error.to_string())?
-            .width,
+            .width, // 正方形窗口宽=高，用宽度即可代表当前画布边长（物理像素，下面换算成逻辑像素）
     ) / scale;
     let (min, max) = crate::pet_geometry::pet_size_range(&window, layout);
     let pet_size = (current + f64::from(delta)).clamp(f64::from(min), f64::from(max));
@@ -287,9 +315,10 @@ pub(crate) fn resize_pet_by(
     Ok(())
 }
 
+// 桌宠区域按下左键拖拽：调用 Tauri 的原生拖拽，由 OS 接管后续的鼠标移动。
 pub(crate) fn start_pet_drag(app: &AppHandle, runtime: &SharedRuntime) -> Result<(), String> {
     if windows_lock(runtime)?.pet_window.locked {
-        return Ok(());
+        return Ok(()); // 锁定状态下不允许拖拽，静默忽略
     }
     app.get_webview_window(PET_LABEL)
         .ok_or_else(|| "桌宠窗口不存在".to_string())?
@@ -309,6 +338,9 @@ pub(crate) fn handle_window_resized(
     }
 }
 
+// 同上，Moved 事件版本：跨显示器拖动后重新应用尺寸约束并广播一次状态变化
+// （constrain_pet_to_current_monitor 内部只在尺寸真的变化时才广播，这里额外广播
+// 一次是因为位置本身也变了，前端翻页条等 UI 需要感知）。
 pub(crate) fn handle_window_moved(window: &tauri::WebviewWindow, runtime: &SharedRuntime) {
     if window.label() == PET_LABEL {
         constrain_pet_to_current_monitor(window, runtime);

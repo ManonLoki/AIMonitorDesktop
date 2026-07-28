@@ -7,6 +7,7 @@ export function PetSettingsApp() {
   const { state } = useWindowState();
   const preferences = state.petWindow;
 
+  // 每次都是“关掉设置窗口”+“做另一件事”两个独立命令，并发发出即可，不必等前一个返回。
   const switchToMain = () => {
     void Promise.all([
       call("hide_pet_settings"),

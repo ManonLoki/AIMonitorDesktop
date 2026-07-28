@@ -26,6 +26,7 @@ pub(crate) fn set_grid(
         state.columns = columns; // 更新列数
     } // 写锁在此处离开作用域被释放，之后再落盘/广播，缩短持锁时间
     {
+        // 行列数变小可能让桌宠原本聚焦的槽位越界（例如从 3×3 改成 2×2），收敛到新范围内。
         let mut windows = runtime.windows.lock().map_err(|_| "窗口状态不可用")?;
         windows.pet_window.focused_slot =
             window_manager::clamp_focused_slot(windows.pet_window.focused_slot, rows, columns);
@@ -80,7 +81,7 @@ pub(crate) fn set_auto_start(
 
 #[tauri::command]
 pub(crate) fn get_window_state(runtime: State<'_, SharedRuntime>) -> WindowState {
-    runtime.window_snapshot()
+    runtime.window_snapshot() // 只读，pet_size_min/max 的显示器查询也在 window_snapshot 内部完成
 }
 
 #[tauri::command]

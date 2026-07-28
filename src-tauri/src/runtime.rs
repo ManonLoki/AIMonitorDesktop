@@ -130,8 +130,10 @@ impl Runtime {
     pub(crate) fn window_snapshot(&self) -> WindowState {
         let (active_mode, pet_window) = {
             let windows = self.windows.lock().expect("window state lock poisoned");
-            (windows.active_mode, windows.pet_window.clone())
+            (windows.active_mode, windows.pet_window.clone()) // clone 完立刻释放锁，再去查窗口句柄
         };
+        // 拿不到桌宠窗口句柄（理论上不会发生，三个窗口在 setup 里就创建好了）时用兜底区间；
+        // 拿得到就按它当前所在的显示器精确计算允许的尺寸范围。
         let (pet_size_min, pet_size_max) = self.app.get_webview_window("pet").map_or_else(
             || crate::pet_geometry::pet_size_range_fallback(pet_window.layout),
             |window| crate::pet_geometry::pet_size_range(&window, pet_window.layout),
