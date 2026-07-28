@@ -22,7 +22,7 @@ pub(crate) struct MonitorTile {
 pub(crate) enum ImageDisplayMode {
     #[default]
     FitCenter, // 保持比例完整显示，多余区域留黑边
-    FillCrop,  // 保持比例铺满宫格，超出部分裁剪
+    FillCrop, // 保持比例铺满宫格，超出部分裁剪
 }
 
 // 桌面端运行时的完整状态快照，也是 Tauri 命令 get_monitor_state 的返回值。
@@ -79,8 +79,8 @@ pub(crate) struct MainWindowPreferences {
     pub(crate) maximized: bool,
 }
 
-fn default_scale_preset() -> u16 {
-    100
+fn default_pet_size() -> u16 {
+    64
 }
 
 fn default_true() -> bool {
@@ -98,8 +98,8 @@ pub(crate) struct PetWindowPreferences {
     pub(crate) single_geometry: Option<WindowGeometry>,
     #[serde(default)]
     pub(crate) grid_geometry: Option<WindowGeometry>,
-    #[serde(default = "default_scale_preset")]
-    pub(crate) scale_preset: u16,
+    #[serde(default = "default_pet_size")]
+    pub(crate) pet_size: u16,
     #[serde(default = "default_true")]
     pub(crate) always_on_top: bool,
     #[serde(default)]
@@ -113,7 +113,7 @@ impl Default for PetWindowPreferences {
             focused_slot: 0,
             single_geometry: None,
             grid_geometry: None,
-            scale_preset: default_scale_preset(),
+            pet_size: default_pet_size(),
             always_on_top: true,
             locked: false,
         }
@@ -136,6 +136,8 @@ pub(crate) struct WindowPreferences {
 pub(crate) struct WindowState {
     pub(crate) active_mode: AppMode,
     pub(crate) pet_window: PetWindowPreferences,
+    pub(crate) pet_size_min: u16,
+    pub(crate) pet_size_max: u16,
 }
 
 // 落盘到 preferences.json 的用户偏好，是 MonitorState 的一个持久化子集
@@ -187,6 +189,8 @@ mod tests {
         let state = WindowState {
             active_mode: AppMode::Pet,
             pet_window: PetWindowPreferences::default(),
+            pet_size_min: 256,
+            pet_size_max: 270,
         };
         let value = serde_json::to_value(state).expect("window state serializes");
         assert_eq!(value["activeMode"], "pet");

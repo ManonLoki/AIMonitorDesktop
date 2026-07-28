@@ -1,11 +1,14 @@
 import type { PetLayout, PetWindowPreferences } from "../types/window";
 
 interface PetContextMenuProps {
-  x: number;
-  y: number;
+  x?: number;
+  y?: number;
+  standalone?: boolean;
   preferences: PetWindowPreferences;
+  sizeMin: number;
+  sizeMax: number;
   onLayout: (layout: PetLayout) => void;
-  onScale: (preset: number) => void;
+  onSize: (size: number) => void;
   onAlwaysOnTop: (enabled: boolean) => void;
   onLocked: (locked: boolean) => void;
   onMain: () => void;
@@ -15,22 +18,26 @@ interface PetContextMenuProps {
 export function PetContextMenu({
   x,
   y,
+  standalone = false,
   preferences,
+  sizeMin,
+  sizeMax,
   onLayout,
-  onScale,
+  onSize,
   onAlwaysOnTop,
   onLocked,
   onMain,
   onHide,
 }: PetContextMenuProps) {
-  const left = Math.min(x, Math.max(8, window.innerWidth - 190));
-  const top = Math.min(y, Math.max(8, window.innerHeight - 310));
+  const left = Math.min(x ?? 8, Math.max(8, window.innerWidth - 190));
+  const top = Math.min(y ?? 8, Math.max(8, window.innerHeight - 326));
+  const size = Math.min(sizeMax, Math.max(sizeMin, preferences.petSize));
   return (
     <div
-      className="pet-context-menu"
+      className={`pet-context-menu${standalone ? " standalone" : ""}`}
       role="menu"
       data-pet-control
-      style={{ left, top }}
+      style={standalone ? undefined : { left, top }}
       onMouseDown={(event) => event.stopPropagation()}
     >
       <div className="pet-menu-label">显示数量</div>
@@ -49,16 +56,18 @@ export function PetContextMenu({
         </button>
       </div>
       <div className="pet-menu-label">桌宠大小</div>
-      <div className="pet-scale-grid" role="group" aria-label="桌宠大小">
-        {[75, 100, 125, 150].map((preset) => (
-          <button
-            className={preferences.scalePreset === preset ? "selected" : ""}
-            key={preset}
-            onClick={() => onScale(preset)}
-          >
-            {preset}%
-          </button>
-        ))}
+      <div className="pet-size-control">
+        <input
+          type="range"
+          min={sizeMin}
+          max={sizeMax}
+          step="1"
+          value={size}
+          aria-label="桌宠大小"
+          aria-valuetext={`${size} 像素`}
+          onChange={(event) => onSize(Number(event.currentTarget.value))}
+        />
+        <output>{size}px</output>
       </div>
       <button
         className="pet-menu-check"

@@ -130,6 +130,8 @@ impl Runtime {
         WindowState {
             active_mode: windows.active_mode,
             pet_window: windows.pet_window.clone(),
+            pet_size_min: crate::window_geometry::pet_canvas_min(windows.pet_window.layout),
+            pet_size_max: 360,
         }
     }
 

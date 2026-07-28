@@ -14,7 +14,7 @@ export interface PetWindowPreferences {
   focusedSlot: number;
   singleGeometry?: WindowGeometry | null;
   gridGeometry?: WindowGeometry | null;
-  scalePreset: number;
+  petSize: number;
   alwaysOnTop: boolean;
   locked: boolean;
 }
@@ -22,6 +22,8 @@ export interface PetWindowPreferences {
 export interface WindowState {
   activeMode: AppMode;
   petWindow: PetWindowPreferences;
+  petSizeMin: number;
+  petSizeMax: number;
 }
 
 export const previewWindowState: WindowState = {
@@ -29,8 +31,10 @@ export const previewWindowState: WindowState = {
   petWindow: {
     layout: "grid",
     focusedSlot: 0,
-    scalePreset: 100,
+    petSize: 64,
     alwaysOnTop: true,
     locked: false,
   },
+  petSizeMin: 256,
+  petSizeMax: 540,
 };

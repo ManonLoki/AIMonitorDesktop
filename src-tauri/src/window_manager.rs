@@ -4,12 +4,13 @@ use crate::model::{AppMode, PetLayout, PetWindowPreferences};
 use crate::runtime::SharedRuntime;
 use crate::window_geometry::{
     apply_pet_constraints, capture_window_state, restore_main_window, restore_pet_window,
+    PET_PAGER_HEIGHT,
 };
-use tauri::{AppHandle, LogicalSize, Manager};
-use tauri_runtime::ResizeDirection;
+use tauri::{AppHandle, LogicalSize, Manager, PhysicalPosition};
 
 const MAIN_LABEL: &str = "main";
 const PET_LABEL: &str = "pet";
+const PET_SETTINGS_LABEL: &str = "pet-settings";
 
 fn label_for_mode(mode: AppMode) -> &'static str {
     match mode {
@@ -48,6 +49,7 @@ fn prepare_window(
                 &window,
                 pet_geometry(&windows.pet_window),
                 windows.pet_window.layout,
+                windows.pet_window.pet_size,
             )
         }
     }
@@ -85,6 +87,9 @@ pub(crate) fn switch_mode(
         capture_window_state(source, runtime);
     }
     let target_window = prepare_window(app, runtime, target)?;
+    if let Some(settings) = app.get_webview_window(PET_SETTINGS_LABEL) {
+        let _ = settings.hide();
+    }
     if let Some(source) = source.as_ref() {
         source.hide().map_err(|error| error.to_string())?;
     }
@@ -123,6 +128,38 @@ pub(crate) fn hide_active_window(app: &AppHandle, runtime: &SharedRuntime) -> Re
     window.hide().map_err(|error| error.to_string())
 }
 
+pub(crate) fn show_pet_settings(app: &AppHandle) -> Result<(), String> {
+    let pet = app
+        .get_webview_window(PET_LABEL)
+        .ok_or_else(|| "桌宠窗口不存在".to_string())?;
+    let monitor = pet
+        .current_monitor()
+        .map_err(|error| error.to_string())?
+        .or_else(|| pet.primary_monitor().ok().flatten())
+        .ok_or_else(|| "无法确定桌宠所在显示器".to_string())?;
+    let window = app
+        .get_webview_window(PET_SETTINGS_LABEL)
+        .ok_or_else(|| "桌宠设置窗口不存在".to_string())?;
+    let area = monitor.work_area();
+    let size = window.outer_size().map_err(|error| error.to_string())?;
+    let x = i64::from(area.position.x)
+        + (i64::from(area.size.width).saturating_sub(i64::from(size.width)) / 2);
+    let y = i64::from(area.position.y)
+        + (i64::from(area.size.height).saturating_sub(i64::from(size.height)) / 2);
+    window
+        .set_position(PhysicalPosition::new(x as i32, y as i32))
+        .map_err(|error| error.to_string())?;
+    window.show().map_err(|error| error.to_string())?;
+    window.set_focus().map_err(|error| error.to_string())
+}
+
+pub(crate) fn hide_pet_settings(app: &AppHandle) -> Result<(), String> {
+    app.get_webview_window(PET_SETTINGS_LABEL)
+        .ok_or_else(|| "桌宠设置窗口不存在".to_string())?
+        .hide()
+        .map_err(|error| error.to_string())
+}
+
 pub(crate) fn set_pet_layout(
     app: &AppHandle,
     runtime: &SharedRuntime,
@@ -138,15 +175,30 @@ pub(crate) fn set_pet_layout(
         .map_err(|_| "窗口状态不可用".to_string())?
         .pet_window
         .clone();
+    let previous_layout = preferences.layout;
+    let previous_size = preferences.pet_size;
+    // 切换布局时以当前窗口左上角为锚点；不要跳回该布局上一次保存的位置。
+    // restore_pet_window 只会在新尺寸越过工作区右侧/下侧时把位置向内收敛。
+    let current_geometry = pet_geometry(&preferences).cloned();
     preferences.layout = layout;
-    restore_pet_window(&window, pet_geometry(&preferences), layout)
-        .map_err(|error| error.to_string())?;
-    runtime
-        .windows
-        .lock()
-        .map_err(|_| "窗口状态不可用".to_string())?
-        .pet_window
-        .layout = layout;
+    let (min, max) = crate::window_geometry::pet_size_range(&window, layout);
+    preferences.pet_size = preferences.pet_size.clamp(min, max);
+    {
+        let mut windows = runtime.windows.lock().map_err(|_| "窗口状态不可用")?;
+        windows.pet_window.layout = layout;
+        windows.pet_window.pet_size = preferences.pet_size;
+    }
+    if let Err(error) = restore_pet_window(
+        &window,
+        current_geometry.as_ref(),
+        layout,
+        preferences.pet_size,
+    ) {
+        let mut windows = runtime.windows.lock().map_err(|_| "窗口状态不可用")?;
+        windows.pet_window.layout = previous_layout;
+        windows.pet_window.pet_size = previous_size;
+        return Err(error.to_string());
+    }
     runtime.save_preferences();
     runtime.window_changed();
     Ok(())
@@ -200,22 +252,11 @@ pub(crate) fn set_pet_locked(runtime: &SharedRuntime, locked: bool) -> Result<()
     Ok(())
 }
 
-fn pet_side_for_preset(layout: PetLayout, preset: u16) -> f64 {
-    let base = match layout {
-        PetLayout::Single => 240.0,
-        PetLayout::Grid => 480.0,
-    };
-    base * f64::from(preset) / 100.0
-}
-
-pub(crate) fn set_pet_scale(
+pub(crate) fn set_pet_size(
     app: &AppHandle,
     runtime: &SharedRuntime,
-    preset: u16,
+    size: u16,
 ) -> Result<(), String> {
-    if !matches!(preset, 75 | 100 | 125 | 150) {
-        return Err("桌宠比例必须为 75、100、125 或 150".into());
-    }
     let layout = runtime
         .windows
         .lock()
@@ -225,17 +266,23 @@ pub(crate) fn set_pet_scale(
     let window = app
         .get_webview_window(PET_LABEL)
         .ok_or_else(|| "桌宠窗口不存在".to_string())?;
+    let (min, max) = crate::window_geometry::pet_size_range(&window, layout);
+    if !(min..=max).contains(&size) {
+        return Err(format!("桌宠大小必须在 {min}–{max} 像素之间"));
+    }
     apply_pet_constraints(&window, layout).map_err(|error| error.to_string())?;
-    let side = pet_side_for_preset(layout, preset);
     window
-        .set_size(LogicalSize::new(side, side))
+        .set_size(LogicalSize::new(
+            f64::from(size),
+            f64::from(size + PET_PAGER_HEIGHT),
+        ))
         .map_err(|error| error.to_string())?;
     runtime
         .windows
         .lock()
         .map_err(|_| "窗口状态不可用")?
         .pet_window
-        .scale_preset = preset;
+        .pet_size = size;
     capture_window_state(&window, runtime);
     runtime.save_preferences();
     runtime.window_changed();
@@ -264,20 +311,22 @@ pub(crate) fn resize_pet_by(
             .map_err(|error| error.to_string())?
             .width,
     ) / scale;
-    let (min, max) = match layout {
-        PetLayout::Single => (160.0, 360.0),
-        PetLayout::Grid => (320.0, 720.0),
-    };
-    let side = (current + f64::from(delta)).clamp(min, max);
+    let (min, max) = crate::window_geometry::pet_size_range(&window, layout);
+    let pet_size = (current + f64::from(delta)).clamp(f64::from(min), f64::from(max));
     window
-        .set_size(LogicalSize::new(side, side))
+        .set_size(LogicalSize::new(
+            pet_size,
+            pet_size + f64::from(PET_PAGER_HEIGHT),
+        ))
         .map_err(|error| error.to_string())?;
     runtime
         .windows
         .lock()
         .map_err(|_| "窗口状态不可用")?
         .pet_window
-        .scale_preset = 0;
+        .pet_size = pet_size.round() as u16;
+    capture_window_state(&window, runtime);
+    runtime.save_preferences();
     runtime.window_changed();
     Ok(())
 }
@@ -295,22 +344,5 @@ pub(crate) fn start_pet_drag(app: &AppHandle, runtime: &SharedRuntime) -> Result
     app.get_webview_window(PET_LABEL)
         .ok_or_else(|| "桌宠窗口不存在".to_string())?
         .start_dragging()
-        .map_err(|error| error.to_string())
-}
-
-pub(crate) fn start_pet_resize(app: &AppHandle, runtime: &SharedRuntime) -> Result<(), String> {
-    {
-        let mut windows = runtime.windows.lock().map_err(|_| "窗口状态不可用")?;
-        if windows.pet_window.locked {
-            return Ok(());
-        }
-        windows.pet_window.scale_preset = 0;
-    }
-    runtime.window_changed();
-    app.get_webview_window(PET_LABEL)
-        .ok_or_else(|| "桌宠窗口不存在".to_string())?
-        .as_ref()
-        .window()
-        .start_resize_dragging(ResizeDirection::SouthEast)
         .map_err(|error| error.to_string())
 }

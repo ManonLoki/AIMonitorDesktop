@@ -16,6 +16,7 @@ const QUIT_MENU_ID: &str = "quit";
 
 /// 托盘中需要由其他入口同步的菜单状态。
 pub(crate) struct TrayMenu {
+    menu: Menu<tauri::Wry>,
     auto_start: CheckMenuItem<tauri::Wry>,
     show_window: MenuItem<tauri::Wry>,
     switch_mode: MenuItem<tauri::Wry>,
@@ -28,20 +29,42 @@ impl TrayMenu {
     }
 
     pub(crate) fn set_mode(&self, mode: AppMode) {
-        let _ = self.show_window.set_text(match mode {
-            AppMode::Main => "显示主界面",
-            AppMode::Pet => "显示桌宠",
-        });
-        let _ = self.switch_mode.set_text(match mode {
-            AppMode::Main => "切换到桌宠",
-            AppMode::Pet => "返回主界面",
-        });
-        let _ = self.pet_locked.set_enabled(mode == AppMode::Pet);
+        sync_mode_items(
+            &self.menu,
+            &self.show_window,
+            &self.switch_mode,
+            &self.pet_locked,
+            mode,
+        );
     }
 
     pub(crate) fn set_pet_locked_checked(&self, locked: bool) {
         let _ = self.pet_locked.set_checked(locked);
     }
+}
+
+fn sync_mode_items(
+    menu: &Menu<tauri::Wry>,
+    show_window: &MenuItem<tauri::Wry>,
+    switch_mode: &MenuItem<tauri::Wry>,
+    pet_locked: &CheckMenuItem<tauri::Wry>,
+    mode: AppMode,
+) {
+    let is_main = mode == AppMode::Main;
+    let _ = show_window.set_text("显示看板");
+    let _ = switch_mode.set_text(if is_main {
+        "切换桌宠"
+    } else {
+        "切换看板"
+    });
+    let _ = menu.remove(show_window);
+    let _ = menu.remove(pet_locked);
+    if is_main {
+        let _ = menu.insert(show_window, 0);
+    } else {
+        let _ = menu.insert(pet_locked, 1);
+    }
+    let _ = pet_locked.set_enabled(!is_main);
 }
 
 /// 第二实例启动时显示当前模式窗口。
@@ -57,9 +80,8 @@ pub fn setup(
     runtime: SharedRuntime,
     auto_start_enabled: bool,
 ) -> tauri::Result<TrayMenu> {
-    let show_window = MenuItem::with_id(app, SHOW_WINDOW_MENU_ID, "显示窗口", true, None::<&str>)?;
-    let switch_mode =
-        MenuItem::with_id(app, SWITCH_MODE_MENU_ID, "切换到桌宠", true, None::<&str>)?;
+    let show_window = MenuItem::with_id(app, SHOW_WINDOW_MENU_ID, "显示看板", true, None::<&str>)?;
+    let switch_mode = MenuItem::with_id(app, SWITCH_MODE_MENU_ID, "切换桌宠", true, None::<&str>)?;
     let auto_start = CheckMenuItem::with_id(
         app,
         AUTO_START_MENU_ID,
@@ -95,6 +117,7 @@ pub fn setup(
     let show_for_events = show_window.clone();
     let switch_for_events = switch_mode.clone();
     let pet_locked_for_events = pet_locked.clone();
+    let menu_for_events = menu.clone();
 
     let mut builder = TrayIconBuilder::new()
         .menu(&menu)
@@ -110,15 +133,13 @@ pub fn setup(
                     AppMode::Pet => AppMode::Main,
                 };
                 if window_manager::switch_mode(app, &runtime_for_events, target).is_ok() {
-                    let _ = show_for_events.set_text(match target {
-                        AppMode::Main => "显示主界面",
-                        AppMode::Pet => "显示桌宠",
-                    });
-                    let _ = switch_for_events.set_text(match target {
-                        AppMode::Main => "切换到桌宠",
-                        AppMode::Pet => "返回主界面",
-                    });
-                    let _ = pet_locked_for_events.set_enabled(target == AppMode::Pet);
+                    sync_mode_items(
+                        &menu_for_events,
+                        &show_for_events,
+                        &switch_for_events,
+                        &pet_locked_for_events,
+                        target,
+                    );
                 }
             }
             AUTO_START_MENU_ID => {
@@ -153,6 +174,7 @@ pub fn setup(
 
     builder.build(app)?;
     let tray = TrayMenu {
+        menu,
         auto_start,
         show_window,
         switch_mode,

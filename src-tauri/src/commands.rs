@@ -4,7 +4,7 @@ use crate::model::{AppMode, ImageDisplayMode, MonitorState, PetLayout, WindowSta
 use crate::runtime::SharedRuntime;
 use crate::tray::TrayMenu;
 use crate::window_manager;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 
 #[tauri::command]
 pub(crate) fn get_monitor_state(runtime: State<'_, SharedRuntime>) -> MonitorState {
@@ -81,8 +81,14 @@ pub(crate) fn set_auto_start(
 }
 
 #[tauri::command]
-pub(crate) fn get_window_state(runtime: State<'_, SharedRuntime>) -> WindowState {
-    runtime.window_snapshot()
+pub(crate) fn get_window_state(app: AppHandle, runtime: State<'_, SharedRuntime>) -> WindowState {
+    let mut state = runtime.window_snapshot();
+    if let Some(window) = app.get_webview_window("pet") {
+        let layout = state.pet_window.layout;
+        (state.pet_size_min, state.pet_size_max) =
+            crate::window_geometry::pet_size_range(&window, layout);
+    }
+    state
 }
 
 #[tauri::command]
@@ -103,6 +109,16 @@ pub(crate) fn hide_current_window(
     runtime: State<'_, SharedRuntime>,
 ) -> Result<(), String> {
     window_manager::hide_active_window(&app, &runtime)
+}
+
+#[tauri::command]
+pub(crate) fn show_pet_settings(app: AppHandle) -> Result<(), String> {
+    window_manager::show_pet_settings(&app)
+}
+
+#[tauri::command]
+pub(crate) fn hide_pet_settings(app: AppHandle) -> Result<(), String> {
+    window_manager::hide_pet_settings(&app)
 }
 
 #[tauri::command]
@@ -143,12 +159,12 @@ pub(crate) fn set_pet_locked(
 }
 
 #[tauri::command]
-pub(crate) fn set_pet_scale(
+pub(crate) fn set_pet_size(
     app: AppHandle,
     runtime: State<'_, SharedRuntime>,
-    preset: u16,
+    size: u16,
 ) -> Result<(), String> {
-    window_manager::set_pet_scale(&app, &runtime, preset)
+    window_manager::set_pet_size(&app, &runtime, size)
 }
 
 #[tauri::command]
@@ -166,12 +182,4 @@ pub(crate) fn start_pet_drag(
     runtime: State<'_, SharedRuntime>,
 ) -> Result<(), String> {
     window_manager::start_pet_drag(&app, &runtime)
-}
-
-#[tauri::command]
-pub(crate) fn start_pet_resize(
-    app: AppHandle,
-    runtime: State<'_, SharedRuntime>,
-) -> Result<(), String> {
-    window_manager::start_pet_resize(&app, &runtime)
 }

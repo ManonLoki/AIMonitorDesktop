@@ -41,15 +41,17 @@ mod window_geometry;
 mod window_manager;
 
 use commands::{
-    get_monitor_state, get_window_state, hide_current_window, resize_pet_by, set_auto_start,
-    set_device_name, set_grid, set_image_display_mode, set_pet_always_on_top, set_pet_focused_slot,
-    set_pet_layout, set_pet_locked, set_pet_scale, start_pet_drag, start_pet_resize,
-    switch_app_mode,
+    get_monitor_state, get_window_state, hide_current_window, hide_pet_settings, resize_pet_by,
+    set_auto_start, set_device_name, set_grid, set_image_display_mode, set_pet_always_on_top,
+    set_pet_focused_slot, set_pet_layout, set_pet_locked, set_pet_size, show_pet_settings,
+    start_pet_drag, switch_app_mode,
 };
 use runtime::{load_preferences, Runtime};
 use std::fs;
 use tauri::{Manager, WindowEvent};
-use window_geometry::{clamp_window_to_work_area, keep_pet_square, save_window_state};
+use window_geometry::{
+    clamp_window_to_work_area, constrain_pet_to_current_monitor, keep_pet_square, save_window_state,
+};
 
 // Tauri 应用入口：注册插件、装配 Runtime、启动三个子系统、暴露 Tauri 命令。
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -88,7 +90,7 @@ pub fn run() {
             );
             runtime.save_preferences(); // 首次落盘，规范化/补全可能缺失的字段
             let tray_menu = tray::setup(app, runtime.clone(), auto_start)?; // 创建托盘菜单并绑定共享状态
-            for label in ["main", "pet"] {
+            for label in ["main", "pet", "pet-settings"] {
                 let Some(window) = app.get_webview_window(label) else {
                     continue;
                 };
@@ -102,6 +104,13 @@ pub fn run() {
                         }
                         save_window_state(&window_for_events, &runtime_for_events, false);
                     } else if matches!(event, WindowEvent::Moved(_)) {
+                        if window_for_events.label() == "pet" {
+                            constrain_pet_to_current_monitor(
+                                &window_for_events,
+                                &runtime_for_events,
+                            );
+                            runtime_for_events.window_changed();
+                        }
                         save_window_state(&window_for_events, &runtime_for_events, false);
                     }
                     if let WindowEvent::CloseRequested { api, .. } = event {
@@ -131,14 +140,15 @@ pub fn run() {
             get_window_state,
             switch_app_mode,
             hide_current_window,
+            show_pet_settings,
+            hide_pet_settings,
             set_pet_layout,
             set_pet_focused_slot,
             set_pet_always_on_top,
             set_pet_locked,
-            set_pet_scale,
+            set_pet_size,
             resize_pet_by,
-            start_pet_drag,
-            start_pet_resize
+            start_pet_drag
         ]) // 注册所有可从前端 invoke 调用的命令
         .run(tauri::generate_context!())
         .expect("AIMonitorDesktop 启动失败");

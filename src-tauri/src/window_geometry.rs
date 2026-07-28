@@ -2,11 +2,11 @@
 
 use crate::model::{MainWindowPreferences, PetLayout, WindowGeometry};
 use crate::runtime::SharedRuntime;
-use tauri::{LogicalSize, PhysicalPosition, PhysicalSize, WebviewWindow};
+use tauri::{LogicalSize, Monitor, PhysicalPosition, PhysicalSize, WebviewWindow};
 
 const MAIN_LABEL: &str = "main";
 const PET_LABEL: &str = "pet";
-
+pub(crate) const PET_PAGER_HEIGHT: u16 = 24;
 pub(crate) fn rectangles_have_visible_overlap(
     window: &WindowGeometry,
     monitor_x: i32,
@@ -108,39 +108,86 @@ pub(crate) fn restore_main_window(
     window.maximize()
 }
 
-fn pet_limits(layout: PetLayout) -> (f64, f64, f64) {
+pub(crate) fn pet_canvas_min(layout: PetLayout) -> u16 {
     match layout {
-        PetLayout::Single => (160.0, 360.0, 240.0),
-        PetLayout::Grid => (320.0, 720.0, 480.0),
+        PetLayout::Single => 64,
+        PetLayout::Grid => 256,
     }
+}
+
+fn pet_size_range_for_monitor(monitor: &Monitor, layout: PetLayout) -> (u16, u16) {
+    let area = monitor.work_area();
+    let min = pet_canvas_min(layout);
+    let max = maximum_pet_size(
+        area.size.width.min(area.size.height),
+        monitor.scale_factor(),
+        layout,
+    );
+    (min, max.max(min))
+}
+
+fn maximum_pet_size(shortest_physical: u32, scale_factor: f64, layout: PetLayout) -> u16 {
+    let divisor = if layout == PetLayout::Grid { 2.0 } else { 4.0 };
+    (f64::from(shortest_physical) / scale_factor / divisor)
+        .floor()
+        .max(f64::from(pet_canvas_min(layout))) as u16
+}
+
+pub(crate) fn pet_size_range(window: &WebviewWindow, layout: PetLayout) -> (u16, u16) {
+    window
+        .current_monitor()
+        .ok()
+        .flatten()
+        .or_else(|| window.primary_monitor().ok().flatten())
+        .map_or((pet_canvas_min(layout), 360), |monitor| {
+            pet_size_range_for_monitor(&monitor, layout)
+        })
+}
+
+fn logical_pet_window_size(canvas_size: u16) -> LogicalSize<f64> {
+    LogicalSize::new(
+        f64::from(canvas_size),
+        f64::from(canvas_size + PET_PAGER_HEIGHT),
+    )
+}
+
+fn physical_pet_window_size(canvas_size: u16, scale: f64) -> PhysicalSize<u32> {
+    let logical = logical_pet_window_size(canvas_size);
+    PhysicalSize::new(
+        (logical.width * scale).round() as u32,
+        (logical.height * scale).round() as u32,
+    )
 }
 
 pub(crate) fn apply_pet_constraints(
     window: &WebviewWindow,
     layout: PetLayout,
 ) -> tauri::Result<()> {
-    let (min, max, _) = pet_limits(layout);
-    window.set_min_size(Some(LogicalSize::new(min, min)))?;
-    window.set_max_size(Some(LogicalSize::new(max, max)))
+    let (min, max) = pet_size_range(window, layout);
+    window.set_min_size(Some(logical_pet_window_size(min)))?;
+    window.set_max_size(Some(logical_pet_window_size(max)))
 }
 
 pub(crate) fn restore_pet_window(
     window: &WebviewWindow,
     geometry: Option<&WindowGeometry>,
     layout: PetLayout,
+    pet_size: u16,
 ) -> tauri::Result<()> {
     apply_pet_constraints(window, layout)?;
     if let Some(geometry) = geometry {
         if let Some(index) = monitor_index_for_geometry(window, geometry) {
             let monitors = window.available_monitors()?;
             let monitor = &monitors[index];
-            let mut size = size_for_scale(geometry, monitor.scale_factor());
-            let side = size
+            let saved_size = size_for_scale(geometry, monitor.scale_factor());
+            let (min, max) = pet_size_range_for_monitor(monitor, layout);
+            let scale = monitor.scale_factor();
+            let footer = (f64::from(PET_PAGER_HEIGHT) * scale).round() as u32;
+            let requested_canvas = saved_size
                 .width
-                .max(size.height)
-                .min(monitor.work_area().size.width)
-                .min(monitor.work_area().size.height);
-            size = PhysicalSize::new(side, side);
+                .max(saved_size.height.saturating_sub(footer));
+            let canvas_size = (f64::from(requested_canvas) / scale).round() as u16;
+            let size = physical_pet_window_size(canvas_size.clamp(min, max), scale);
             window.set_size(size)?;
             window.set_position(clamped_position(
                 geometry.x,
@@ -157,16 +204,15 @@ pub(crate) fn restore_pet_window(
         .primary_monitor()?
         .or(window.current_monitor()?)
         .ok_or_else(|| tauri::Error::FailedToReceiveMessage)?;
-    let (_, _, default_side) = pet_limits(layout);
+    let (min, max) = pet_size_range_for_monitor(&monitor, layout);
     let scale = monitor.scale_factor();
-    let side = (default_side * scale).round() as u32;
-    let size = PhysicalSize::new(side, side);
+    let size = physical_pet_window_size(pet_size.clamp(min, max), scale);
     let area = monitor.work_area();
     let margin = (16.0 * scale).round() as i32;
     window.set_size(size)?;
     window.set_position(PhysicalPosition::new(
-        area.position.x + area.size.width as i32 - side as i32 - margin,
-        area.position.y + area.size.height as i32 - side as i32 - margin,
+        area.position.x + area.size.width as i32 - size.width as i32 - margin,
+        area.position.y + area.size.height as i32 - size.height as i32 - margin,
     ))
 }
 
@@ -218,9 +264,11 @@ pub(crate) fn keep_pet_square(
     size: PhysicalSize<u32>,
     runtime: &SharedRuntime,
 ) {
-    if size.width.abs_diff(size.height) <= 1 {
-        return;
-    }
+    let layout = runtime
+        .windows
+        .lock()
+        .map(|windows| windows.pet_window.layout)
+        .unwrap_or_default();
     let previous = runtime
         .windows
         .lock()
@@ -237,14 +285,40 @@ pub(crate) fn keep_pet_square(
                     .unwrap_or(geometry.scale_factor.max(1.0)),
             )
         });
-    let side = previous.map_or(size.width, |previous| {
+    let scale = window.scale_factor().unwrap_or(1.0);
+    let footer = (f64::from(PET_PAGER_HEIGHT) * scale).round() as u32;
+    let requested_canvas = previous.map_or(size.width, |previous| {
         if size.width.abs_diff(previous.width) >= size.height.abs_diff(previous.height) {
             size.width
         } else {
-            size.height
+            size.height.saturating_sub(footer)
         }
     });
-    let _ = window.set_size(PhysicalSize::new(side, side));
+    let (min, max) = pet_size_range(window, layout);
+    let pet_size = ((f64::from(requested_canvas) / scale).round() as u16).clamp(min, max);
+    let expected = physical_pet_window_size(pet_size, scale);
+    if size.width.abs_diff(expected.width) > 1 || size.height.abs_diff(expected.height) > 1 {
+        let _ = window.set_size(expected);
+    }
+    if let Ok(mut windows) = runtime.windows.lock() {
+        if windows.pet_window.pet_size != pet_size {
+            windows.pet_window.pet_size = pet_size;
+            runtime.window_changed();
+        }
+    }
+}
+
+pub(crate) fn constrain_pet_to_current_monitor(window: &WebviewWindow, runtime: &SharedRuntime) {
+    let layout = runtime
+        .windows
+        .lock()
+        .map(|windows| windows.pet_window.layout)
+        .unwrap_or_default();
+    let _ = apply_pet_constraints(window, layout);
+    let Ok(size) = window.inner_size() else {
+        return;
+    };
+    keep_pet_square(window, size, runtime);
 }
 
 pub(crate) fn clamp_window_to_work_area(window: &WebviewWindow) {
@@ -281,7 +355,6 @@ mod tests {
             scale_factor: 1.0,
         }
     }
-
     #[test]
     fn accepts_geometry_with_a_reachable_window_area() {
         assert!(rectangles_have_visible_overlap(
@@ -292,7 +365,6 @@ mod tests {
             1_080
         ));
     }
-
     #[test]
     fn rejects_geometry_left_on_a_removed_monitor() {
         assert!(!rectangles_have_visible_overlap(
@@ -303,7 +375,6 @@ mod tests {
             1_080
         ));
     }
-
     #[test]
     fn rescales_saved_physical_size_for_new_dpi() {
         let saved = WindowGeometry {
@@ -314,5 +385,15 @@ mod tests {
             scale_factor: 2.0,
         };
         assert_eq!(size_for_scale(&saved, 1.0), PhysicalSize::new(200, 200));
+    }
+    #[test]
+    fn limits_pet_to_one_quarter_of_the_logical_shortest_edge() {
+        assert_eq!(maximum_pet_size(1_080, 1.0, PetLayout::Single), 270);
+        assert_eq!(maximum_pet_size(1_080, 2.0, PetLayout::Single), 135);
+        assert_eq!(maximum_pet_size(1_080, 1.0, PetLayout::Grid), 540);
+        assert_eq!(logical_pet_window_size(64), LogicalSize::new(64.0, 88.0));
+        assert_eq!(logical_pet_window_size(256), LogicalSize::new(256.0, 280.0));
+        assert_eq!(pet_canvas_min(PetLayout::Single), 64);
+        assert_eq!(pet_canvas_min(PetLayout::Grid), 256);
     }
 }
