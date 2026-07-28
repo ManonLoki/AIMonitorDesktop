@@ -3,6 +3,7 @@ import { useMonitorState } from "./hooks/useMonitorState";
 import { useWindowState } from "./hooks/useWindowState";
 import { call } from "./lib/tauri";
 import { buildImageUrl, type MonitorTile } from "./types/monitor";
+import { useI18n, type TranslationFunction } from "./i18n";
 
 const LAYOUT_CAPACITY = {
   single: 1,
@@ -14,13 +15,14 @@ const LAYOUT_CAPACITY = {
 } as const;
 
 // 桌宠里的单个宫格：有图片时只显示图片 + 悬浮标签，没有数据时显示序号占位。
-function PetTile({ tile, index, imageUrl }: {
+function PetTile({ tile, index, imageUrl, t }: {
   tile?: MonitorTile;
   index: number;
   imageUrl?: string;
+  t: TranslationFunction;
 }) {
   const name = tile?.aiName.trim() || "AI";
-  const username = tile?.username.trim() || "用户";
+  const username = tile?.username.trim() || t("user");
   const content = tile?.content.trim();
   const title = `${name}_${username}`;
   return (
@@ -28,7 +30,7 @@ function PetTile({ tile, index, imageUrl }: {
       {imageUrl ? (
         <img src={imageUrl} alt={`${index + 1}-${title}`} draggable={false} />
       ) : (
-        <div className="pet-empty"><span>{String(index + 1).padStart(2, "0")}</span><small>等待数据</small></div>
+        <div className="pet-empty"><span>{String(index + 1).padStart(2, "0")}</span><small>{t("waitingData")}</small></div>
       )}
       {tile && (
         <div className="pet-labels" aria-label={content ? `${title}，${content}` : title}>
@@ -42,6 +44,7 @@ function PetTile({ tile, index, imageUrl }: {
 
 export function PetApp() {
   const { state: monitor } = useMonitorState(); // 宫格数据（rows/columns/tiles），跟主窗口共享同一份状态
+  const { t } = useI18n(monitor.language);
   const { state: windows } = useWindowState(); // 桌宠自己的窗口偏好（布局/锁定/焦点槽位等）
   const preferences = windows.petWindow;
   const [isHovered, setIsHovered] = useState(false);
@@ -143,7 +146,7 @@ export function PetApp() {
       onWheel={onWheel}
       onContextMenu={onContextMenu}
       tabIndex={0}
-      aria-label={`桌宠，第 ${pageIndex + 1} 页，共 ${pageCount} 页`}
+      aria-label={t("petAria", { page: pageIndex + 1, pages: pageCount })}
     >
       <div className="pet-grid">
         {pageSlots.map((slot) => {
@@ -151,22 +154,22 @@ export function PetApp() {
           const imageUrl = tile?.imageFilename
             ? buildImageUrl(monitor.port, tile.imageFilename)
             : undefined;
-          return <PetTile tile={tile} index={slot} imageUrl={imageUrl} key={slot} />;
+          return <PetTile tile={tile} index={slot} imageUrl={imageUrl} t={t} key={slot} />;
         })}
       </div>
 
       <div className="pet-pager" data-pet-control aria-hidden={!isHovered}>
         <button
-          aria-label="上一页"
-          title="上一页"
+          aria-label={t("previousPage")}
+          title={t("previousPage")}
           disabled={pageCount <= 1}
           tabIndex={isHovered ? 0 : -1}
           onClick={() => turnPage(-1)}
         >‹</button>
         <span>{pageIndex + 1}/{pageCount}</span>
         <button
-          aria-label="下一页"
-          title="下一页"
+          aria-label={t("nextPage")}
+          title={t("nextPage")}
           disabled={pageCount <= 1}
           tabIndex={isHovered ? 0 : -1}
           onClick={() => turnPage(1)}

@@ -5,6 +5,7 @@ import { Icon } from "./components/Icon";
 import { MonitorCanvas } from "./components/MonitorCanvas";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { useMonitorState } from "./hooks/useMonitorState";
+import { useI18n } from "./i18n";
 
 // 应用根组件：左侧固定导航栏 + 右侧工作区（监控画布 / 设置页二选一）。
 // 全部状态来自 useMonitorState（订阅 Rust 后端），不再引入路由库——
@@ -13,7 +14,8 @@ export function MonitorApp() {
   const { state, refresh } = useMonitorState(); // 唯一的数据来源：Rust 后端状态 + 手动刷新方法
   const [destination, setDestination] = useState<"monitor" | "settings">("monitor"); // 当前展示的工作区页面
   const [sidebarExpanded, setSidebarExpanded] = useState(false); // 侧边栏是否展开（默认折叠，仅显示图标）
-  const statusText = `版本 ${state.appVersion}`; // 侧边栏品牌区展示的版本号文案
+  const { t } = useI18n(state.language);
+  const statusText = t("version", { version: state.appVersion }); // 侧边栏品牌区展示的版本号文案
 
   return (
     <div className="app-shell">
@@ -30,44 +32,44 @@ export function MonitorApp() {
         <button
           type="button"
           className="sidebar-toggle"
-          aria-label={sidebarExpanded ? "收起侧边栏" : "展开侧边栏"} // 无障碍标签随展开状态变化
+          aria-label={sidebarExpanded ? t("collapseSidebar") : t("expandSidebar")} // 无障碍标签随展开状态变化
           aria-expanded={sidebarExpanded}
-          title={sidebarExpanded ? "收起侧边栏" : "展开侧边栏"}
+          title={sidebarExpanded ? t("collapseSidebar") : t("expandSidebar")}
           onClick={() => setSidebarExpanded((expanded) => !expanded)} // 点击切换展开/折叠
         >
           <Icon name="sidebar" />
         </button>
-        <nav aria-label="主导航">
+        <nav aria-label={t("mainNavigation")}>
           {/* “监控”导航项：点击切换到监控画布页 */}
           <button
-            title="监控"
+            title={t("monitor")}
             className={destination === "monitor" ? "active" : ""}
             onClick={() => setDestination("monitor")}
           >
             <Icon name="monitor" />
-            <span>监控</span>
+            <span>{t("monitor")}</span>
           </button>
           {/* “设置”导航项：点击切换到设置页 */}
           <button
-            title="设置"
+            title={t("settings")}
             className={destination === "settings" ? "active" : ""}
             onClick={() => setDestination("settings")}
           >
             <Icon name="settings" />
-            <span>设置</span>
+            <span>{t("settings")}</span>
           </button>
         </nav>
         <div className="mode-switch">
-          <small>显示模式</small>
-          <button title="切换到桌宠模式" onClick={() => void invoke("switch_app_mode", { mode: "pet" })}>
+          <small>{t("displayMode")}</small>
+          <button title={t("switchToPet")} onClick={() => void invoke("switch_app_mode", { mode: "pet" })}>
             <Icon name="pet" />
-            <span>桌宠模式</span>
+            <span>{t("petMode")}</span>
           </button>
         </div>
         <div className="server-indicator">
           {/* HTTP 服务是否已完成绑定，绿点/文案随之切换 */}
           <i className={state.isServerRunning ? "online" : ""} />
-          <span>{state.isServerRunning ? "服务运行中" : "服务启动中"}</span>
+          <span>{state.isServerRunning ? t("serverRunning") : t("serverStarting")}</span>
         </div>
       </aside>
       <div className="workspace">
@@ -79,9 +81,9 @@ export function MonitorApp() {
           key={destination}
         >
           {destination === "monitor" ? (
-            <MonitorCanvas state={state} /> // 监控画布：渲染宫格
+            <MonitorCanvas state={state} t={t} /> // 监控画布：渲染宫格
           ) : (
-            <SettingsPanel state={state} onRefresh={refresh} /> // 设置页：修改配置后调用 refresh 拉取最新状态
+            <SettingsPanel state={state} onRefresh={refresh} t={t} /> // 设置页：修改配置后调用 refresh 拉取最新状态
           )}
         </AnimatedContent>
       </div>

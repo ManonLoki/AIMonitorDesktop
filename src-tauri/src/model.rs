@@ -25,6 +25,26 @@ pub(crate) enum ImageDisplayMode {
     FillCrop, // 保持比例铺满宫格，超出部分裁剪
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) enum LanguagePreference {
+    #[default]
+    #[serde(rename = "system")]
+    System,
+    #[serde(rename = "zh-CN")]
+    Chinese,
+    #[serde(rename = "en")]
+    English,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
+pub(crate) enum ResolvedLocale {
+    #[default]
+    #[serde(rename = "zh-CN")]
+    Chinese,
+    #[serde(rename = "en")]
+    English,
+}
+
 // 桌面端运行时的完整状态快照，也是 Tauri 命令 get_monitor_state 的返回值。
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -33,6 +53,7 @@ pub(crate) struct MonitorState {
     pub(crate) columns: u8,                          // 当前宫格列数（1-5）
     pub(crate) image_display_mode: ImageDisplayMode, // 全局图片显示模式
     pub(crate) auto_start: bool,                     // 是否已启用开机自启
+    pub(crate) language: LanguagePreference,         // 界面语言偏好，默认跟随系统
     pub(crate) port: u16,                            // 当前 HTTP 服务实际监听的端口
     pub(crate) app_version: String,                  // 应用版本号（来自 Cargo/Tauri 打包信息）
     pub(crate) device_id: String,                    // 持久化的设备唯一标识
@@ -167,6 +188,8 @@ pub(crate) struct Preferences {
     #[serde(default)] // 旧版本偏好文件里可能没有这个字段，缺省为 false
     pub(crate) auto_start: bool,
     #[serde(default)]
+    pub(crate) language: LanguagePreference,
+    #[serde(default)]
     pub(crate) windows: WindowPreferences,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) window: Option<WindowGeometry>, // 仅用于迁移 1.1 及更早版本
@@ -192,6 +215,7 @@ mod tests {
         .expect("legacy preferences should deserialize");
 
         assert_eq!(preferences.windows.active_mode, AppMode::Main);
+        assert_eq!(preferences.language, LanguagePreference::System);
         assert_eq!(preferences.windows.pet_window.layout, PetLayout::Grid);
         assert!(preferences.windows.pet_window.always_on_top);
         assert_eq!(
@@ -213,5 +237,17 @@ mod tests {
         assert_eq!(value["petWindow"]["layout"], "grid");
         assert_eq!(serde_json::to_value(PetLayout::Row3).unwrap(), "row3");
         assert_eq!(serde_json::to_value(PetLayout::Column3).unwrap(), "column3");
+        assert_eq!(
+            serde_json::to_value(LanguagePreference::System).unwrap(),
+            "system"
+        );
+        assert_eq!(
+            serde_json::to_value(LanguagePreference::Chinese).unwrap(),
+            "zh-CN"
+        );
+        assert_eq!(
+            serde_json::to_value(LanguagePreference::English).unwrap(),
+            "en"
+        );
     }
 }

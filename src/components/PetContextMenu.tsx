@@ -1,4 +1,5 @@
 import type { PetLayout, PetWindowPreferences } from "../types/window";
+import type { TranslationFunction } from "../i18n";
 
 interface PetContextMenuProps {
   x?: number;
@@ -13,6 +14,7 @@ interface PetContextMenuProps {
   onLocked: (locked: boolean) => void;
   onMain: () => void;
   onHide: () => void;
+  t: TranslationFunction;
 }
 
 export function PetContextMenu({
@@ -28,6 +30,7 @@ export function PetContextMenu({
   onLocked,
   onMain,
   onHide,
+  t,
 }: PetContextMenuProps) {
   const left = Math.min(x ?? 8, Math.max(8, window.innerWidth - 190));
   const top = Math.min(y ?? 8, Math.max(8, window.innerHeight - 326));
@@ -40,8 +43,8 @@ export function PetContextMenu({
       style={standalone ? undefined : { left, top }}
       onMouseDown={(event) => event.stopPropagation()}
     >
-      <div className="pet-menu-label">显示数量</div>
-      <div className="pet-menu-segment" role="group" aria-label="桌宠布局">
+      <div className="pet-menu-label">{t("displayCount")}</div>
+      <div className="pet-menu-segment" role="group" aria-label={t("petLayout")}>
         <button
           className={preferences.layout === "single" ? "selected" : ""}
           onClick={() => onLayout("single")}
@@ -79,7 +82,7 @@ export function PetContextMenu({
           2×2
         </button>
       </div>
-      <div className="pet-menu-label">桌宠大小</div>
+      <div className="pet-menu-label">{t("petSize")}</div>
       <div className="pet-size-control">
         <input
           type="range"
@@ -87,8 +90,8 @@ export function PetContextMenu({
           max={sizeMax}
           step="1"
           value={size}
-          aria-label="桌宠大小"
-          aria-valuetext={`${size} 像素`}
+          aria-label={t("petSize")}
+          aria-valuetext={t("pixels", { size })}
           onChange={(event) => onSize(Number(event.currentTarget.value))}
         />
         <output>{size}px</output>
@@ -99,7 +102,7 @@ export function PetContextMenu({
         aria-checked={preferences.alwaysOnTop}
         onClick={() => onAlwaysOnTop(!preferences.alwaysOnTop)}
       >
-        <span>{preferences.alwaysOnTop ? "✓" : ""}</span>始终置顶
+        <span>{preferences.alwaysOnTop ? "✓" : ""}</span>{t("alwaysOnTop")}
       </button>
       <button
         className="pet-menu-check"
@@ -107,11 +110,11 @@ export function PetContextMenu({
         aria-checked={preferences.locked}
         onClick={() => onLocked(!preferences.locked)}
       >
-        <span>{preferences.locked ? "✓" : ""}</span>锁定位置和大小
+        <span>{preferences.locked ? "✓" : ""}</span>{t("lockPositionSize")}
       </button>
       <div className="pet-menu-divider" />
-      <button role="menuitem" onClick={onMain}>返回主界面</button>
-      <button role="menuitem" onClick={onHide}>隐藏到托盘</button>
+      <button role="menuitem" onClick={onMain}>{t("returnMain")}</button>
+      <button role="menuitem" onClick={onHide}>{t("hideToTray")}</button>
     </div>
   );
 }

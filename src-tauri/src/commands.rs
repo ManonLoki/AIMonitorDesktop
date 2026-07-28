@@ -1,10 +1,13 @@
 // —— 以下 #[tauri::command] 是前端读写 Rust 状态的统一入口 ——
 // 写命令遵循“修改 Rust 状态 → 按需落盘 preferences → 广播 changed 事件”；读命令只返回快照。
-use crate::model::{AppMode, ImageDisplayMode, MonitorState, PetLayout, WindowState};
+use crate::model::{
+    AppMode, ImageDisplayMode, LanguagePreference, MonitorState, PetLayout, ResolvedLocale,
+    WindowState,
+};
 use crate::runtime::SharedRuntime;
 use crate::tray::TrayMenu;
 use crate::window_manager;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 
 #[tauri::command]
 pub(crate) fn get_monitor_state(runtime: State<'_, SharedRuntime>) -> MonitorState {
@@ -77,6 +80,51 @@ pub(crate) fn set_auto_start(
     runtime.set_auto_start(enabled)?;
     tray_menu.set_auto_start_checked(enabled);
     Ok(())
+}
+
+#[tauri::command]
+pub(crate) fn set_language(
+    runtime: State<'_, SharedRuntime>,
+    language: LanguagePreference,
+) -> Result<(), String> {
+    runtime.state.write().map_err(|_| "状态不可用")?.language = language;
+    runtime.save_preferences();
+    runtime.changed();
+    Ok(())
+}
+
+#[tauri::command]
+pub(crate) fn sync_language(
+    app: AppHandle,
+    runtime: State<'_, SharedRuntime>,
+    tray_menu: State<'_, TrayMenu>,
+    locale: ResolvedLocale,
+) {
+    tray_menu.set_language(locale, runtime.window_snapshot().active_mode);
+    let english = locale == ResolvedLocale::English;
+    for (label, title) in [
+        ("main", "AIMonitorDesktop"),
+        (
+            "pet",
+            if english {
+                "AIMonitorDesktop Desktop Pet"
+            } else {
+                "AIMonitorDesktop 桌宠"
+            },
+        ),
+        (
+            "pet-settings",
+            if english {
+                "AIMonitorDesktop Desktop Pet Settings"
+            } else {
+                "AIMonitorDesktop 桌宠设置"
+            },
+        ),
+    ] {
+        if let Some(window) = app.get_webview_window(label) {
+            let _ = window.set_title(title);
+        }
+    }
 }
 
 #[tauri::command]

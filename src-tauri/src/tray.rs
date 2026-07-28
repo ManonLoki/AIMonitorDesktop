@@ -1,11 +1,16 @@
 //! 系统托盘及其菜单行为。
 
 use crate::runtime::SharedRuntime;
-use crate::{model::AppMode, window_geometry::capture_window_state, window_manager};
+use crate::{
+    model::{AppMode, LanguagePreference, ResolvedLocale},
+    window_geometry::capture_window_state,
+    window_manager,
+};
+use std::sync::{Arc, Mutex};
 use tauri::{
+    App, AppHandle, Manager,
     menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem},
     tray::TrayIconBuilder,
-    App, AppHandle, Manager,
 };
 
 const SHOW_WINDOW_MENU_ID: &str = "show-window";
@@ -21,6 +26,8 @@ pub(crate) struct TrayMenu {
     show_window: MenuItem<tauri::Wry>,
     switch_mode: MenuItem<tauri::Wry>,
     pet_locked: CheckMenuItem<tauri::Wry>,
+    quit: MenuItem<tauri::Wry>,
+    locale: Arc<Mutex<ResolvedLocale>>,
 }
 
 impl TrayMenu {
@@ -29,17 +36,43 @@ impl TrayMenu {
     }
 
     pub(crate) fn set_mode(&self, mode: AppMode) {
+        let locale = *self.locale.lock().expect("tray locale lock poisoned");
         sync_mode_items(
             &self.menu,
             &self.show_window,
             &self.switch_mode,
             &self.pet_locked,
             mode,
+            locale,
         );
     }
 
     pub(crate) fn set_pet_locked_checked(&self, locked: bool) {
         let _ = self.pet_locked.set_checked(locked);
+    }
+
+    pub(crate) fn set_language(&self, locale: ResolvedLocale, mode: AppMode) {
+        *self.locale.lock().expect("tray locale lock poisoned") = locale;
+        let english = locale == ResolvedLocale::English;
+        let _ = self.auto_start.set_text(if english {
+            "Launch at startup"
+        } else {
+            "开机自启"
+        });
+        let _ = self.pet_locked.set_text(if english {
+            "Lock desktop pet"
+        } else {
+            "锁定桌宠"
+        });
+        let _ = self.quit.set_text(if english { "Quit" } else { "退出" });
+        sync_mode_items(
+            &self.menu,
+            &self.show_window,
+            &self.switch_mode,
+            &self.pet_locked,
+            mode,
+            locale,
+        );
     }
 }
 
@@ -49,11 +82,21 @@ fn sync_mode_items(
     switch_mode: &MenuItem<tauri::Wry>,
     pet_locked: &CheckMenuItem<tauri::Wry>,
     mode: AppMode,
+    locale: ResolvedLocale,
 ) {
     let is_main = mode == AppMode::Main;
-    let _ = show_window.set_text("显示看板");
-    let _ = switch_mode.set_text(if is_main {
+    let english = locale == ResolvedLocale::English;
+    let _ = show_window.set_text(if english {
+        "Show dashboard"
+    } else {
+        "显示看板"
+    });
+    let _ = switch_mode.set_text(if is_main && english {
+        "Desktop pet mode"
+    } else if is_main {
         "桌宠模式"
+    } else if english {
+        "Dashboard mode"
     } else {
         "看板模式"
     });
@@ -118,6 +161,12 @@ pub fn setup(
     let switch_for_events = switch_mode.clone();
     let pet_locked_for_events = pet_locked.clone();
     let menu_for_events = menu.clone();
+    let initial_locale = match runtime.snapshot().language {
+        LanguagePreference::English => ResolvedLocale::English,
+        LanguagePreference::System | LanguagePreference::Chinese => ResolvedLocale::Chinese,
+    };
+    let locale = Arc::new(Mutex::new(initial_locale));
+    let locale_for_events = locale.clone();
 
     let mut builder = TrayIconBuilder::new()
         .menu(&menu)
@@ -139,6 +188,7 @@ pub fn setup(
                         &switch_for_events,
                         &pet_locked_for_events,
                         target,
+                        *locale_for_events.lock().expect("tray locale lock poisoned"),
                     );
                 }
             }
@@ -179,7 +229,9 @@ pub fn setup(
         show_window,
         switch_mode,
         pet_locked,
+        quit,
+        locale,
     };
-    tray.set_mode(runtime.window_snapshot().active_mode);
+    tray.set_language(initial_locale, runtime.window_snapshot().active_mode);
     Ok(tray)
 }

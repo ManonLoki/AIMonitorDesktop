@@ -1,10 +1,11 @@
 import { AnimatedContent } from "./reactbits/AnimatedContent";
 import { Icon } from "./Icon";
 import { buildImageUrl, type MonitorState } from "../types/monitor";
+import type { TranslationFunction } from "../i18n";
 
 // 监控画布：按当前 rows × columns 渲染实际可见的宫格（最多 25 个，多余的裁掉不渲染）。
 // 每个宫格展示：图片（若有）、"序号-AI名称-用户名" 表头、正文文案与更新时间。
-export function MonitorCanvas({ state }: { state: MonitorState }) {
+export function MonitorCanvas({ state, t }: { state: MonitorState; t: TranslationFunction }) {
   // 后端始终维护满 25 个宫格的数组，这里只取当前行列布局需要展示的前 N 个。
   const visible = state.tiles.slice(0, state.rows * state.columns);
   // 行列数较多时（>=4）空间更紧张，用 compact 样式收敛内边距与文案。
@@ -17,14 +18,14 @@ export function MonitorCanvas({ state }: { state: MonitorState }) {
         gridTemplateColumns: `repeat(${state.columns}, minmax(0, 1fr))`, // CSS Grid 按列数均分宽度
         gridTemplateRows: `repeat(${state.rows}, minmax(0, 1fr))`, // CSS Grid 按行数均分高度
       }}
-      aria-label={`${state.rows} 行 ${state.columns} 列监控宫格`}
+      aria-label={t("gridAria", { rows: state.rows, columns: state.columns })}
     >
       {visible.map((tile, index) => {
         const imageUrl = tile.imageFilename
           ? buildImageUrl(state.port, tile.imageFilename)
           : undefined; // 没有图片文件名则不渲染 img 标签
         const aiName = tile.aiName.trim() || "AI"; // 空 AI 名称时的占位文案
-        const username = tile.username.trim() || "等待数据"; // 空用户名时的占位文案
+        const username = tile.username.trim() || t("waitingData"); // 空用户名时的占位文案
         return (
           // 入场动画的延迟按序号递增但设置上限，避免宫格很多时最后几个等待过久。
           <AnimatedContent
@@ -52,7 +53,7 @@ export function MonitorCanvas({ state }: { state: MonitorState }) {
                 // 没有图片时展示占位图标 + 文案（compact 模式下省略文案以节省空间）
                 <div className="empty-state">
                   <Icon name="image" />
-                  {!compact && <span>等待数据</span>}
+                  {!compact && <span>{t("waitingData")}</span>}
                 </div>
               )}
               {tile.content && (
@@ -61,7 +62,7 @@ export function MonitorCanvas({ state }: { state: MonitorState }) {
                   <span>{tile.content}</span>
                   {tile.updatedAtMillis && (
                     <time>
-                      {new Date(tile.updatedAtMillis).toLocaleTimeString("zh-CN", {
+                      {new Date(tile.updatedAtMillis).toLocaleTimeString(document.documentElement.lang, {
                         hour12: false, // 使用 24 小时制展示时间
                       })}
                     </time>

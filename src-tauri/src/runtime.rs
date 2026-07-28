@@ -9,8 +9,8 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicU64, Ordering},
         Arc, Mutex, RwLock,
+        atomic::{AtomicU64, Ordering},
     },
     time::Duration,
 };
@@ -55,6 +55,7 @@ impl Runtime {
                 columns: preferences.columns.clamp(1, 5),
                 image_display_mode: preferences.image_display_mode,
                 auto_start,
+                language: preferences.language,
                 // 端口先占位，等 start_http_server 实际绑定成功后再回填真实值。
                 port: FIRST_HTTP_PORT,
                 app_version,
@@ -86,6 +87,7 @@ impl Runtime {
             columns: state.columns,
             image_display_mode: state.image_display_mode,
             auto_start: state.auto_start,
+            language: state.language,
             windows: self
                 .windows
                 .lock()
@@ -187,6 +189,7 @@ pub(crate) fn load_preferences(path: &Path) -> Preferences {
             columns: 2,                                                    // 默认 2 列
             image_display_mode: crate::model::ImageDisplayMode::default(), // 默认等比缩放
             auto_start: false,                                             // 默认不开机自启
+            language: crate::model::LanguagePreference::default(),         // 默认跟随系统语言
             windows: WindowPreferences::default(),
             window: None,
             device_id: Uuid::new_v4().to_string(), // 首次启动生成一个新的随机设备 ID

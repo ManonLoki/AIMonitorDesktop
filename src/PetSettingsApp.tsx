@@ -2,9 +2,13 @@ import { PetContextMenu } from "./components/PetContextMenu";
 import { useWindowState } from "./hooks/useWindowState";
 import { call } from "./lib/tauri";
 import type { PetLayout } from "./types/window";
+import { useMonitorState } from "./hooks/useMonitorState";
+import { useI18n } from "./i18n";
 
 export function PetSettingsApp() {
   const { state } = useWindowState();
+  const { state: monitor } = useMonitorState();
+  const { t } = useI18n(monitor.language);
   const preferences = state.petWindow;
 
   // 每次都是“关掉设置窗口”+“做另一件事”两个独立命令，并发发出即可，不必等前一个返回。
@@ -26,13 +30,13 @@ export function PetSettingsApp() {
     <main className="pet-settings-shell">
       <header>
         <div>
-          <strong>桌宠设置</strong>
-          <small>尺寸按当前显示器自动限制</small>
+          <strong>{t("petSettings")}</strong>
+          <small>{t("petSettingsHint")}</small>
         </div>
         <button
           type="button"
-          aria-label="关闭桌宠设置"
-          title="关闭"
+          aria-label={t("closePetSettings")}
+          title={t("close")}
           onClick={() => void call("hide_pet_settings")}
         >
           ×
@@ -49,6 +53,7 @@ export function PetSettingsApp() {
         onLocked={(locked) => void call("set_pet_locked", { locked })}
         onMain={switchToMain}
         onHide={hidePet}
+        t={t}
       />
     </main>
   );

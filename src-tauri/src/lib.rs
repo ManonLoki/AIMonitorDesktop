@@ -45,9 +45,9 @@ mod window_manager;
 
 use commands::{
     get_monitor_state, get_window_state, hide_current_window, hide_pet_settings, resize_pet_by,
-    set_auto_start, set_device_name, set_grid, set_image_display_mode, set_pet_always_on_top,
-    set_pet_focused_slot, set_pet_layout, set_pet_locked, set_pet_size, show_pet_settings,
-    start_pet_drag, switch_app_mode,
+    set_auto_start, set_device_name, set_grid, set_image_display_mode, set_language,
+    set_pet_always_on_top, set_pet_focused_slot, set_pet_layout, set_pet_locked, set_pet_size,
+    show_pet_settings, start_pet_drag, switch_app_mode, sync_language,
 };
 use runtime::{load_preferences, Runtime};
 use std::fs;
@@ -136,6 +136,8 @@ pub fn run() {
             set_image_display_mode,
             set_device_name,
             set_auto_start,
+            set_language,
+            sync_language,
             get_window_state,
             switch_app_mode,
             hide_current_window,

@@ -5,6 +5,7 @@
 // - FIT_CENTER：保持图片比例完整显示，多余区域留黑边
 // - FILL_CROP：保持比例并铺满宫格，超出部分会被裁剪
 export type ImageDisplayMode = "FIT_CENTER" | "FILL_CROP";
+export type LanguagePreference = "system" | "zh-CN" | "en";
 
 // 单个监控宫格的数据，由局域网内的客户端通过 POST /api/slots/{slot} 推送。
 export interface MonitorTile {
@@ -21,6 +22,7 @@ export interface MonitorState {
   columns: number; // 当前宫格列数（1-5）
   imageDisplayMode: ImageDisplayMode; // 全局图片显示模式
   autoStart: boolean; // 是否已启用开机自启
+  language: LanguagePreference; // 界面语言偏好，system 表示跟随操作系统
   port: number; // 当前 HTTP 服务实际监听的端口
   appVersion: string; // 应用版本号
   deviceId: string; // 持久化的设备唯一标识
@@ -49,11 +51,12 @@ export const previewState: MonitorState = {
   columns: 2, // 预览时的默认列数
   imageDisplayMode: "FIT_CENTER", // 预览时的默认图片显示模式
   autoStart: false, // 预览时默认未开启自启
+  language: "system", // 首次启动默认跟随系统语言
   port: 10241, // 预览时展示的默认端口（与后端 FIRST_HTTP_PORT 一致）
-  appVersion: "2.0.2", // 预览时展示的占位版本号
-  deviceId: "初始化中", // 真实设备 ID 尚未从后端拉取到时的占位文案
+  appVersion: "2.0.3", // 预览时展示的占位版本号
+  deviceId: "", // 真实设备 ID 尚未从后端拉取到时由界面显示本地化占位文案
   deviceName: "AIMonitorDesktop", // 预览时的默认设备名
   isServerRunning: false, // 预览时服务尚未启动
-  localIp: "未连接局域网", // 预览时的占位 IP 文案
+  localIp: "", // 预览时由界面显示本地化的未连接占位文案
   tiles: Array.from({ length: 25 }, emptyTile), // 生成 25 个空宫格占位
 };

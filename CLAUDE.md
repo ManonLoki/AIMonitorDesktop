@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-AIMonitorDesktop `2.0.2` — a Tauri 2 desktop app (Windows/macOS) that is a 1:1 port of an existing Android app (`/Users/manonloki/Documents/my-work/ai/AiMonitorAndroid`). Version 2 establishes the multi-native-window architecture with Rust-owned window state and a mutually exclusive lightweight desktop-pet mode. It shows a 1–5×1–5 grid of tiles (AI name, username, image, content, updated time) and exposes an HTTP API + mDNS/UDP discovery so the Android app (or anything else on the LAN) can push tile updates to it. Product requirements are in `PRODUCT_REQUIREMENTS.md`; the current pet contract is in `docs/DESKTOP_PET_MODE_DESIGN.md`. With no saved geometry the main window maximizes on first launch; later launches restore the persisted main/pet mode without flashing the other window.
+AIMonitorDesktop `2.0.3` — a Tauri 2 desktop app (Windows/macOS) that is a 1:1 port of an existing Android app (`/Users/manonloki/Documents/my-work/ai/AiMonitorAndroid`). Version 2 establishes the multi-native-window architecture with Rust-owned window state and a mutually exclusive lightweight desktop-pet mode. It shows a 1–5×1–5 grid of tiles (AI name, username, image, content, updated time) and exposes an HTTP API + mDNS/UDP discovery so the Android app (or anything else on the LAN) can push tile updates to it. Product requirements are in `PRODUCT_REQUIREMENTS.md`; the current pet contract is in `docs/DESKTOP_PET_MODE_DESIGN.md`. With no saved geometry the main window maximizes on first launch; later launches restore the persisted main/pet mode without flashing the other window.
 
 ## Code gate: 400-line file limit
 
