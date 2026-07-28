@@ -4,7 +4,7 @@ use crate::model::{AppMode, ImageDisplayMode, MonitorState, PetLayout, WindowSta
 use crate::runtime::SharedRuntime;
 use crate::tray::TrayMenu;
 use crate::window_manager;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, State};
 
 #[tauri::command]
 pub(crate) fn get_monitor_state(runtime: State<'_, SharedRuntime>) -> MonitorState {
@@ -79,14 +79,8 @@ pub(crate) fn set_auto_start(
 }
 
 #[tauri::command]
-pub(crate) fn get_window_state(app: AppHandle, runtime: State<'_, SharedRuntime>) -> WindowState {
-    let mut state = runtime.window_snapshot();
-    if let Some(window) = app.get_webview_window("pet") {
-        let layout = state.pet_window.layout;
-        (state.pet_size_min, state.pet_size_max) =
-            crate::window_geometry::pet_size_range(&window, layout);
-    }
-    state
+pub(crate) fn get_window_state(runtime: State<'_, SharedRuntime>) -> WindowState {
+    runtime.window_snapshot()
 }
 
 #[tauri::command]

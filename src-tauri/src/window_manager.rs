@@ -1,11 +1,10 @@
 //! 两个互斥窗口的显示、模式切换与桌宠交互。
 
 use crate::model::{AppMode, PetLayout, PetWindowPreferences, WindowPreferences};
+use crate::pet_geometry::{apply_pet_constraints, constrain_pet_to_current_monitor, handle_pet_resize};
 use crate::runtime::SharedRuntime;
 use crate::window_geometry::{
-    apply_pet_constraints, capture_window_state, clamp_window_to_work_area,
-    constrain_pet_to_current_monitor, keep_pet_square, restore_main_window, restore_pet_window,
-    PET_PAGER_HEIGHT,
+    capture_window_state, restore_main_window, restore_pet_window, PET_PAGER_HEIGHT,
 };
 use std::sync::MutexGuard;
 use tauri::{AppHandle, LogicalSize, Manager, PhysicalPosition, PhysicalSize};
@@ -174,7 +173,7 @@ pub(crate) fn set_pet_layout(
     // restore_pet_window 只会在新尺寸越过工作区右侧/下侧时把位置向内收敛。
     let current_geometry = pet_geometry(&preferences).cloned();
     preferences.layout = layout;
-    let (min, max) = crate::window_geometry::pet_size_range(&window, layout);
+    let (min, max) = crate::pet_geometry::pet_size_range(&window, layout);
     preferences.pet_size = preferences.pet_size.clamp(min, max);
     {
         let mut windows = windows_lock(runtime)?;
@@ -235,7 +234,7 @@ pub(crate) fn set_pet_size(
     let window = app
         .get_webview_window(PET_LABEL)
         .ok_or_else(|| "桌宠窗口不存在".to_string())?;
-    let (min, max) = crate::window_geometry::pet_size_range(&window, layout);
+    let (min, max) = crate::pet_geometry::pet_size_range(&window, layout);
     if !(min..=max).contains(&size) {
         return Err(format!("桌宠大小必须在 {min}–{max} 像素之间"));
     }
@@ -274,7 +273,7 @@ pub(crate) fn resize_pet_by(
             .map_err(|error| error.to_string())?
             .width,
     ) / scale;
-    let (min, max) = crate::window_geometry::pet_size_range(&window, layout);
+    let (min, max) = crate::pet_geometry::pet_size_range(&window, layout);
     let pet_size = (current + f64::from(delta)).clamp(f64::from(min), f64::from(max));
     window
         .set_size(LogicalSize::new(
@@ -306,8 +305,7 @@ pub(crate) fn handle_window_resized(
     runtime: &SharedRuntime,
 ) {
     if window.label() == PET_LABEL {
-        keep_pet_square(window, size, runtime);
-        clamp_window_to_work_area(window);
+        handle_pet_resize(window, size, runtime);
     }
 }
 

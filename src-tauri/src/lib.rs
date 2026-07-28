@@ -12,7 +12,8 @@
 // - commands.rs          5 个 #[tauri::command]，前端唯一的写入入口
 // - device_info.rs       默认设备名、局域网 IP 探测
 // - image.rs              图片格式探测、GIF 循环修正、文件名校验、异步文件探测
-// - window_geometry.rs    窗口几何的可用性判断、恢复与保存
+// - window_geometry.rs    窗口几何持久化：可用性判断、恢复与保存
+// - pet_geometry.rs       桌宠窗口的尺寸约束与跨显示器收敛（与几何持久化职责分开）
 // - discovery.rs          UDP 主动发现（纯异步）
 // - mdns.rs                mDNS 服务注册
 // - http/                 基于 Axum 的纯异步 HTTP 服务器：mod.rs 负责路由挂载与共享的
@@ -35,6 +36,7 @@ mod http;
 mod image;
 mod mdns;
 mod model;
+mod pet_geometry;
 mod runtime;
 mod tray;
 mod window_geometry;

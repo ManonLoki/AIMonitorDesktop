@@ -15,7 +15,7 @@ use std::{
     },
     time::Duration,
 };
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_autostart::ManagerExt;
 use uuid::Uuid;
 
@@ -125,13 +125,22 @@ impl Runtime {
         });
     }
 
+    // pet_size_min/max 依赖当前显示器，只有拿到桌宠窗口句柄才能算准；
+    // 算不到时回退到 pet_geometry 里唯一的兜底值，而不是在这里再写一份。
     pub(crate) fn window_snapshot(&self) -> WindowState {
-        let windows = self.windows.lock().expect("window state lock poisoned");
+        let (active_mode, pet_window) = {
+            let windows = self.windows.lock().expect("window state lock poisoned");
+            (windows.active_mode, windows.pet_window.clone())
+        };
+        let (pet_size_min, pet_size_max) = self.app.get_webview_window("pet").map_or_else(
+            || crate::pet_geometry::pet_size_range_fallback(pet_window.layout),
+            |window| crate::pet_geometry::pet_size_range(&window, pet_window.layout),
+        );
         WindowState {
-            active_mode: windows.active_mode,
-            pet_window: windows.pet_window.clone(),
-            pet_size_min: crate::window_geometry::pet_canvas_min(windows.pet_window.layout),
-            pet_size_max: 360,
+            active_mode,
+            pet_window,
+            pet_size_min,
+            pet_size_max,
         }
     }
 
