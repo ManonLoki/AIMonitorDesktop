@@ -1,6 +1,5 @@
-// 贯穿 HTTP/UDP/mDNS 三个子系统共享的运行时上下文，以及它的持久化逻辑。
-// 三个子系统各自的实现分别在 http/discovery/mdns 模块，都通过 SharedRuntime
-// （即 Arc<Runtime>）读写同一份状态。
+// 贯穿 HTTP、心跳清理、UDP 与 mDNS 后台服务的共享运行时上下文及其持久化逻辑。
+// 各服务都通过 SharedRuntime（即 Arc<Runtime>）读写同一份状态。
 use crate::constants::FIRST_HTTP_PORT;
 use crate::device_info::{default_device_name, local_ipv4};
 use crate::heartbeat::ClientLeases;
@@ -19,7 +18,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_autostart::ManagerExt;
 use uuid::Uuid;
 
-// 贯穿三个子系统共享的运行时上下文，以 Arc 的形式在线程间传递。
+// 贯穿后台服务共享的运行时上下文，以 Arc 的形式跨任务/线程传递。
 pub(crate) struct Runtime {
     // 用 RwLock 而非 Mutex：HTTP 读请求（GET /api/device 等）远多于写请求，
     // 读写锁允许多个只读请求并发执行，只有修改宫格/设置时才需要独占锁。

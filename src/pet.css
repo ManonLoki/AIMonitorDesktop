@@ -217,5 +217,5 @@ html.pet-window, html.pet-window body, html.pet-window #root {
 .pet-menu-divider { height: 1px; margin: 6px 2px; background: rgba(255,255,255,.1); }
 
 @media (prefers-reduced-motion: reduce) {
-  .pet-empty, .pet-pager { transition: none; }
+  .pet-empty, .pet-labels, .pet-pager { transition: none; }
 }

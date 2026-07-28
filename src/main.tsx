@@ -1,5 +1,5 @@
 import React from "react"; // React.StrictMode 需要
-import ReactDOM from "react-dom/client"; // React 18 客户端渲染入口
+import ReactDOM from "react-dom/client"; // React 19 客户端渲染入口
 import { MonitorApp } from "./MonitorApp"; // 应用根组件
 import { PetApp } from "./PetApp";
 import { PetSettingsApp } from "./PetSettingsApp";

@@ -1,6 +1,6 @@
 # AIMonitorDesktop 技术选型
 
-当前技术基线：`2.0.0`（多原生窗口与 Rust 统一窗口状态架构）。
+当前技术基线：`2.0.2`（多原生窗口与 Rust 统一窗口状态架构）。
 
 本文件用于固化项目基础技术栈。新增基础设施前，应优先复用下列方案，避免出现职责重叠的库。
 
@@ -9,7 +9,7 @@
 | 桌面运行时 | Tauri 2 | 原生窗口、系统能力、Rust 命令与应用打包 |
 | UI 视图 | React 19 + TypeScript | 组件与视图逻辑 |
 | UI 动效 | React Bits + GSAP 3 | 页面入场、滚动呈现与轻量交互反馈；组件源码收敛在项目内 |
-| 前后端通信 | `@tauri-apps/api`（invoke / event） | 前端通过 `invoke` 调用 Rust 命令，通过 `listen("monitor-state-changed", ...)` 订阅状态变化；不经过 HTTP |
+| 状态控制通路 | `@tauri-apps/api`（invoke / event） | 前端通过 `invoke` 调用 Rust 命令，通过 `listen("monitor-state-changed", ...)` / `listen("window-state-changed", ...)` 订阅状态变化；图片二进制仍从内置 HTTP 服务的回环地址读取 |
 | 局域网 HTTP API | Axum 0.8 + Tokio（`net`/`fs`） + tower-http（CORS） | 面向局域网客户端的 REST API（含槽位、图片和 `/api/clients/{clientId}/heartbeat`）与 UDP 发现；纯异步请求处理，不手写 socket |
 | 构建 | Vite 8 | 前端开发服务器与生产构建 |
 | 包管理 | pnpm 10 | 使用 `pnpm-lock.yaml` 与精确依赖版本 |
@@ -49,7 +49,10 @@ src/
 └── styles.css             # 主窗口样式
 ```
 
-后端 `src-tauri/src/` 按职责拆成多个模块（详见 `CLAUDE.md` 的 Architecture 一节），核心是共享同一个 `Arc<Runtime>` 的三个子系统，其中 HTTP 与 UDP 均为纯异步实现（Axum + Tokio，无手写线程池）：
+后端 `src-tauri/src/` 按职责拆成多个模块（详见 `CLAUDE.md` 的 Architecture 一节），
+核心是 HTTP、心跳租约清理、UDP 发现和 mDNS 注册等后台服务共享同一个
+`Arc<Runtime>`；其中 HTTP、心跳清理与 UDP 均为纯异步实现（Axum + Tokio，
+无手写线程池）：
 
 ```text
 src-tauri/src/
@@ -67,7 +70,9 @@ src-tauri/src/
 
 ## 约束
 
-1. 前端与后端的数据通路统一走 Tauri `invoke`（写）+ `listen("monitor-state-changed")`（读），不引入 HTTP 客户端做进程内通信。
+1. 前端状态读写统一走 Tauri `invoke`（读写）+ `listen(...)`（变化通知），不引入
+   HTTP 客户端传递进程内状态；监控图片按现有规则从
+   `http://127.0.0.1:{port}/api/images/{filename}` 读取。
 2. Rust 侧暴露给局域网的 HTTP API 需与 Android 版保持兼容；API v3 的槽位 POST
    必须携带 `clientId`，每 30 秒续租，2 分钟超时后按 DELETE 语义清理所属槽位。
 3. 优先复用 `src/components/` 下已有组件，避免重复建设。

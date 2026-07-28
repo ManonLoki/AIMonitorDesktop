@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-AIMonitorDesktop `2.0.0` — a Tauri 2 desktop app (Windows/macOS) that is a 1:1 port of an existing Android app (`/Users/manonloki/Documents/my-work/ai/AiMonitorAndroid`). Version 2 establishes the multi-native-window architecture with Rust-owned window state and a mutually exclusive lightweight desktop-pet mode. It shows a 1–5×1–5 grid of tiles (AI name, username, image, content, updated time) and exposes an HTTP API + mDNS/UDP discovery so the Android app (or anything else on the LAN) can push tile updates to it. Product requirements are in `PRODUCT_REQUIREMENTS.md`; the frozen pet contract is in `docs/DESKTOP_PET_MODE_DESIGN.md`. With no saved geometry the main window maximizes on first launch; later launches restore the persisted main/pet mode without flashing the other window.
+AIMonitorDesktop `2.0.2` — a Tauri 2 desktop app (Windows/macOS) that is a 1:1 port of an existing Android app (`/Users/manonloki/Documents/my-work/ai/AiMonitorAndroid`). Version 2 establishes the multi-native-window architecture with Rust-owned window state and a mutually exclusive lightweight desktop-pet mode. It shows a 1–5×1–5 grid of tiles (AI name, username, image, content, updated time) and exposes an HTTP API + mDNS/UDP discovery so the Android app (or anything else on the LAN) can push tile updates to it. Product requirements are in `PRODUCT_REQUIREMENTS.md`; the current pet contract is in `docs/DESKTOP_PET_MODE_DESIGN.md`. With no saved geometry the main window maximizes on first launch; later launches restore the persisted main/pet mode without flashing the other window.
 
 ## Code gate: 400-line file limit
 
@@ -21,7 +21,8 @@ pnpm run check:filesize   # just the 400-line file gate, standalone
 pnpm run build            # tsc --build && vite build (frontend only)
 ```
 
-Release builds (macOS host required for both):
+Release builds (`build:mac` and the combined `build:release` require macOS;
+`build:win` supports macOS or Linux):
 
 ```bash
 pnpm run build:mac      # universal DMG; AIMONITOR_MAC_TARGET=aarch64-apple-darwin|x86_64-apple-darwin for single-arch
@@ -29,13 +30,13 @@ pnpm run build:win      # cross-compiles Windows x64 NSIS installer via cargo-xw
 pnpm run build:release  # both, sequentially
 ```
 
-`scripts/build-release.mjs` only wipes/repopulates `publish/` after every requested platform build succeeds; it never copies partial artifacts. Windows cross-build needs `cargo-xwin`, NSIS (`makensis`), and LLVM (`llvm-rc` on `PATH`) — `brew install llvm nsis && cargo install --locked cargo-xwin && rustup target add x86_64-pc-windows-msvc`. There is no separate frontend test suite or linter configured — `pnpm run check` is the only automated verification step. Rust unit tests live inline next to the code they cover (`#[cfg(test)] mod tests` in `image.rs` and `window_geometry.rs`) and run with `cargo test` from `src-tauri/`.
+`scripts/build-release.mjs` only wipes/repopulates `publish/` after every requested platform build succeeds; it never copies partial artifacts. Windows cross-build needs `cargo-xwin`, NSIS (`makensis`), and LLVM (`llvm-rc` on `PATH`) — on macOS use `brew install llvm nsis && cargo install --locked cargo-xwin && rustup target add x86_64-pc-windows-msvc`; on Linux install the equivalent LLVM/NSIS packages. There is no separate frontend test suite or linter configured. `pnpm run check` covers TypeScript and the file-length gate; Rust unit tests live inline next to the modules they cover and run with `cargo test` from `src-tauri/`.
 
 Full release rules (canonical naming, source-to-output map, prerequisite troubleshooting) are in `.agents/skills/build-aimonitor-desktop/` — read `references/release-contract.md` before touching build config or diagnosing a packaging failure. Key invariant: the product/binary/bundle/installer name must stay `AIMonitorDesktop` everywhere; don't touch `bundle.targets`, `mainBinaryName`, or swap NSIS/DMG for WiX/MSI.
 
 ## Architecture
 
-**The backend is the source of truth.** It's a single Cargo crate (`src-tauri/src/`) split into modules by responsibility — no file crosses the 400-line gate above. A single `Runtime` struct (rows/columns, tiles, device identity, window geometry, image dir) is held behind `Arc<RwLock<...>>` (the `SharedRuntime` alias) and shared between three concurrent subsystems started from `lib.rs::run()`:
+**The backend is the source of truth.** It's a single Cargo crate (`src-tauri/src/`) split into modules by responsibility — no file crosses the 400-line gate above. A single `Runtime` struct (rows/columns, tiles, device identity, window geometry, image dir) is shared as `Arc<Runtime>` (the `SharedRuntime` alias); its monitor state uses `RwLock`, while window preferences and client leases use `Mutex`. HTTP, heartbeat cleanup, UDP discovery, and mDNS registration are all started from `lib.rs::run()`:
 
 ```text
 src-tauri/src/
@@ -55,16 +56,17 @@ src-tauri/src/
     ├── mod.rs                # build_router + start_http_server (tokio::net::TcpListener + axum::serve, no manual thread pool) + shared error_json helper
     ├── device.rs              # /health, /api/config, /api/device
     ├── images.rs              # /api/images (list/upload), /api/images/{filename} (get/delete)
-    └── slots.rs                # /api/slots/{1..25} (update/clear a tile)
+    ├── slots.rs                # /api/slots/{1..25} (update/clear a tile)
+    └── clients.rs              # /api/clients/{clientId}/heartbeat
 ```
 
-1. **The HTTP server** (`http/`) is an Axum app running on Tauri's own Tokio runtime — no manual `TcpListener` parsing or thread pool. `http::start_http_server` finds the first available port from `10241` upward with an async bind loop (via `tauri::async_runtime::block_on`, since Tauri's `setup()` callback is itself synchronous), then hands the listener to `axum::serve(...)` spawned as a background task (`tauri::async_runtime::spawn`) — every connection after that is scheduled onto Tokio, not a hand-rolled worker thread. It serves the Android-compatible REST API: `/health`, `/api/device`, `/api/config`, `/api/images` (GET list/POST upload), `/api/images/{filename}` (GET/DELETE), `/api/slots/{1..25}` (POST update tile / DELETE clear tile). This API's shape is dictated by the Android app — don't change request/response fields or status codes without checking Android-side compatibility; handlers build `{"error": "..."}` JSON responses via the shared `http::error_json` helper (not Axum's default rejection bodies) specifically to preserve that contract — route modules import it with `use super::error_json` rather than each defining their own. `GET /api/images` (`http/images.rs`) uses `probe_image_file` (`image.rs`, now `async fn` over `tokio::fs`) to sniff each file's magic bytes and stat its size instead of reading the whole file into memory — keep that pattern if you touch the listing path, since the image directory can hold multi-MB GIFs. Request body size is capped via `DefaultBodyLimit` (`constants::MAX_BODY_BYTES`); CORS is a permissive `tower_http::cors::CorsLayer` handling `OPTIONS` automatically.
+1. **The HTTP server** (`http/`) is an Axum app running on Tauri's own Tokio runtime — no manual `TcpListener` parsing or thread pool. `http::start_http_server` finds the first available port from `10241` upward with an async bind loop (via `tauri::async_runtime::block_on`, since Tauri's `setup()` callback is itself synchronous), then hands the listener to `axum::serve(...)` spawned as a background task (`tauri::async_runtime::spawn`) — every connection after that is scheduled onto Tokio, not a hand-rolled worker thread. It serves the Android-compatible REST API: `/health`, `/api/device`, `/api/config`, `/api/images` (GET list/POST upload), `/api/images/{filename}` (GET/DELETE), `/api/slots/{1..25}` (POST update tile / DELETE clear tile), and `/api/clients/{clientId}/heartbeat` (POST lease renewal). This API's shape is dictated by the Android app — don't change request/response fields or status codes without checking Android-side compatibility; handlers build `{"error": "..."}` JSON responses via the shared `http::error_json` helper (not Axum's default rejection bodies) specifically to preserve that contract — route modules import it with `use super::error_json` rather than each defining their own. `GET /api/images` (`http/images.rs`) uses `probe_image_file` (`image.rs`, now `async fn` over `tokio::fs`) to sniff each file's magic bytes and stat its size instead of reading the whole file into memory — keep that pattern if you touch the listing path, since the image directory can hold multi-MB GIFs. Request body size is capped via `DefaultBodyLimit` (`constants::MAX_BODY_BYTES`); CORS is a permissive `tower_http::cors::CorsLayer` handling `OPTIONS` automatically.
 2. **UDP discovery** (`discovery.rs::start_udp_discovery`) — a `tokio::net::UdpSocket` task (also via `tauri::async_runtime::spawn`) listening on `8080`, replies to a literal `AIMONITOR_DISCOVER_V1` broadcast with device JSON. No blocking socket or dedicated `std::thread`.
 3. **mDNS** (`mdns.rs::start_mdns`) — registers `_aimonitor._tcp.local.` via `mdns-sd`. This crate manages its own internal thread for the service daemon; that's the third-party library's implementation detail, not something this codebase hand-rolls, so it's out of scope for the "network layer is pure async" rule below.
 
 The HTTP/UDP network layer is pure async by design (Tokio + Axum, no manual threads or blocking sockets) — this is a deliberate architectural choice, not just an implementation detail, so keep new endpoints and socket code on this model rather than reintroducing blocking I/O or manual thread spawning.
 
-Tauri commands in `commands.rs` are the only way the frontend mutates state. Monitor mutations emit `monitor-state-changed`; mode, layout, focus, size, topmost and lock mutations emit `window-state-changed`. Both paths persist through `Runtime` to `preferences.json`. The fixed native window labels are `main`, `pet`, and `pet-settings`; Rust owns their visibility, mutual exclusion, geometry restoration and failure rollback. Pet geometry stays square above a 24-logical-pixel pager and is constrained per monitor/DPI. Before `pet-settings` is shown, position it in the center of the work area for the monitor currently containing `pet`; do not use the settings window's previous monitor or the global primary monitor as the source of truth.
+Tauri commands in `commands.rs` are the only way the frontend mutates state. Monitor mutations emit `monitor-state-changed`; mode, layout, focus, size, topmost and lock mutations emit `window-state-changed`. Both paths persist through `Runtime` to `preferences.json`. The fixed native window labels are `main`, `pet`, and `pet-settings`; Rust owns their visibility, mutual exclusion, geometry restoration and failure rollback. Every pet cell stays square, the window keeps the selected layout's aspect ratio, and the 24-logical-pixel pager overlays the canvas instead of increasing window height. Geometry is constrained per monitor/DPI. Before `pet-settings` is shown, position it in the center of the work area for the monitor currently containing `pet`; do not use the settings window's previous monitor or the global primary monitor as the source of truth.
 
 The tray is mode-specific. In main/dashboard mode it shows `桌宠模式`, `显示看板`, `开机自启`, `退出`, in that order. In pet mode it shows `看板模式`, `锁定桌宠`, `开机自启`, `退出`. Hide inapplicable items instead of leaving the pet lock disabled in dashboard mode.
 
@@ -72,7 +74,7 @@ The tray is mode-specific. In main/dashboard mode it shows `桌宠模式`, `显�
 
 - `src/types/monitor.ts` — shared types (`MonitorState`, `MonitorTile`, `ImageDisplayMode`) mirroring the Rust structs field-for-field (serde converts `snake_case` → `camelCase`).
 - `src/hooks/useMonitorState.ts` and `src/hooks/useWindowState.ts` — the two read models over the same Rust `Runtime`. They call `get_monitor_state` / `get_window_state` and re-fetch from the corresponding Tauri event. There is no local optimistic state; every mutation goes Rust → event → refetch.
-- `src/components/Icon.tsx`, `MonitorCanvas.tsx`, `SettingsPanel.tsx` — presentational pieces. `MonitorCanvas` renders the tile grid (images fetched from `http://127.0.0.1:{port}/api/images/{filename}`); `SettingsPanel` is the only place that calls the mutating Tauri commands.
+- `src/components/Icon.tsx`, `MonitorCanvas.tsx`, `SettingsPanel.tsx` — main-window UI pieces. `MonitorCanvas` renders the tile grid (images fetched from `http://127.0.0.1:{port}/api/images/{filename}`); `SettingsPanel` owns the main settings mutations, while the composition roots and pet controls invoke their mode/window commands directly.
 - `src/MonitorApp.tsx`, `src/PetApp.tsx`, and `src/PetSettingsApp.tsx` — composition roots selected by the window URL's `view` query in `src/main.tsx`; this is not a client router. `PetContextMenu` contains reusable settings controls despite its historical component name.
 - `src/components/reactbits/` — hand-maintained React Bits animation components (`AnimatedContent`, `SpotlightCard`) adapted for desktop and `prefers-reduced-motion` — see `THIRD_PARTY_NOTICES.md` for upstream licensing. Extend these in place rather than pulling the upstream package.
 
@@ -86,7 +88,7 @@ These are binding choices for this repo — don't introduce a second library cov
 | --- | --- | --- |
 | Desktop runtime | Tauri 2 | native window, OS capabilities, Rust commands, packaging |
 | Motion | React Bits + GSAP 3 | entrance/scroll/interaction only; must respect `prefers-reduced-motion` |
-| Frontend↔backend communication | `@tauri-apps/api` (`invoke` + `listen`) | all state reads/writes; no HTTP client in the loop |
+| Frontend↔backend state control | `@tauri-apps/api` (`invoke` + `listen`) | all state reads/writes; image bytes are the intentional loopback-HTTP exception |
 
 Mantine, TanStack Router/Query, Axios, and Jotai were present in `package.json` from initial scaffolding but never wired into the live app — they've been removed along with the dead files that referenced them (`src/router.tsx`, `src/pages/`, `src/query-client.ts`, `src/state/`, `src/api/`). If a future feature genuinely needs routing, server-state caching, or shared client state, evaluate and re-add deliberately rather than assuming the old scaffold reflects current intent. When bumping a dependency's major version, update the pinned version, `pnpm-lock.yaml`, and the table in `TECH_STACK.md` together.
 

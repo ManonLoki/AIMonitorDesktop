@@ -1,5 +1,5 @@
-// —— 以下 5 个 #[tauri::command] 是前端唯一能触达 Rust 状态的入口 ——
-// 每个命令的写法都遵循同一套约定：加写锁改状态 → 落盘 preferences → 广播 changed 事件。
+// —— 以下 #[tauri::command] 是前端读写 Rust 状态的统一入口 ——
+// 写命令遵循“修改 Rust 状态 → 按需落盘 preferences → 广播 changed 事件”；读命令只返回快照。
 use crate::model::{AppMode, ImageDisplayMode, MonitorState, PetLayout, WindowState};
 use crate::runtime::SharedRuntime;
 use crate::tray::TrayMenu;

@@ -2,14 +2,14 @@
 
 ## 1. 文档状态
 
-- 状态：已实现并冻结
-- 版本基线：`2.0.0`
-- 冻结日期：2026-07-28
+- 状态：已实现，与当前实现同步
+- 版本基线：`2.0.2`
+- 最近核对日期：2026-07-28
 - 适用平台：Windows、macOS
 - 相关基线：`PRODUCT_REQUIREMENTS.md`、`TECH_STACK.md`
 - 实现来源：`src/`、`src-tauri/src/` 与 `src-tauri/tauri.conf.json`
 
-本文固化 2.0.0 桌宠模式的产品行为、窗口架构、持久化字段与验收边界。
+本文记录 2.0.2 桌宠模式的当前产品行为、窗口架构、持久化字段与验收边界。
 实现变更如影响本文任一条目，必须在同一提交中更新本文及项目级文档。
 
 ## 2. 目标
@@ -183,6 +183,7 @@ grid   capacity = 4
 - `row3` 使用 1×3，`column3` 使用 3×1。
 - `grid` 使用固定 2×2；最后一页不足四个槽位时保留空位，不重新排版。
 - 空槽位平时透明，悬停时显示淡化的“等待数据”。
+- 整页都没有角色图片时，非悬停状态保留淡轮廓，避免透明窗口完全不可见。
 - 不压缩或重排空槽位，保证角色位置稳定。
 
 ### 7.2 分页计算
@@ -191,7 +192,7 @@ grid   capacity = 4
 
 ```text
 focusedSlot: 0-based slot index
-capacity: 1, 2 or 4
+capacity: 1, 2, 3 or 4
 pageIndex = floor(focusedSlot / capacity)
 pageCount = ceil(visibleSlotCount / capacity)
 pageStart = pageIndex × capacity
@@ -210,8 +211,12 @@ pageStart = pageIndex × capacity
 - 普通鼠标滚轮翻页。
 - 第一页向前翻跳到最后一页。
 - 最后一页向后翻跳到第一页。
-- 不因任意槽位更新而自动翻页。
+- 除下述首次有图定位外，不因槽位更新自动翻页。
+- 窗口挂载后首次观察到有效图片时，如果当前页没有图片，则自动定位到首个有图
+  槽位所在页；该初始定位每次窗口挂载最多执行一次。
+- 完成首次有图定位后，后续槽位更新不再自动翻页。
 - 滚轮需要节流，避免一次滚动跨越多页。
+- 窗口获得键盘焦点后，左右方向键可循环翻页。
 
 ## 8. 桌宠内容与视觉
 
@@ -237,7 +242,8 @@ pageStart = pageIndex × capacity
 ### 8.3 可访问性与动效
 
 - 控件必须有中文无障碍名称。
-- 键盘聚焦时控件保持可见。
+- 桌宠根区域可获得键盘焦点并响应左右方向键；分页按钮仅在鼠标悬停时显示并
+  进入 Tab 顺序，隐藏时同步设置 `aria-hidden`。
 - 动效遵守 `prefers-reduced-motion`。
 - 不添加持续干扰监控的循环 UI 动效；角色图片自身的 GIF 动画不受此限制。
 
@@ -292,7 +298,8 @@ column3Geometry
 gridGeometry
 ```
 
-首次进入桌宠且没有可用几何时，使用布局最小尺寸并放在主显示器工作区右下角。
+首次进入桌宠且没有可用几何时，使用默认 64px 单格边长（再按当前显示器范围
+收敛），并放在主显示器工作区右下角。
 运行中切换布局时保持当前窗口左上角锚点，并将当前画布尺寸收敛到新布局范围；
 只有越过工作区右侧或下侧时才向内调整。分别保存的几何用于重启与模式恢复，
 切换布局本身不会把窗口跳回另一布局曾经保存的位置。
@@ -306,37 +313,44 @@ gridGeometry
 
 ## 10. 持久化设计
 
-### 10.1 建议结构
+### 10.1 实际结构
 
-示意结构如下，最终字段名可按 Rust 模型调整：
+以下是 `Preferences.windows` 的实际结构示例；尺寸为物理像素，示例中 2×2 布局的
+`petSize = 64` 是单格逻辑边长，因此在 `scaleFactor = 2` 时窗口为 256×256 物理像素：
 
 ```json
 {
-  "activeMode": "pet",
-  "mainWindow": {
-    "normalGeometry": {
-      "x": 120,
-      "y": 80,
-      "width": 1280,
-      "height": 800,
-      "scaleFactor": 2
+  "windows": {
+    "activeMode": "pet",
+    "mainWindow": {
+      "normalGeometry": {
+        "x": 120,
+        "y": 80,
+        "width": 1280,
+        "height": 800,
+        "scaleFactor": 2
+      },
+      "maximized": true
     },
-    "maximized": true
-  },
-  "petWindow": {
-    "layout": "grid",
-    "focusedSlot": 0,
-    "singleGeometry": null,
-    "gridGeometry": {
-      "x": 1400,
-      "y": 500,
-      "width": 480,
-      "height": 504,
-      "scaleFactor": 2
-    },
-    "petSize": 64,
-    "alwaysOnTop": true,
-    "locked": false
+    "petWindow": {
+      "layout": "grid",
+      "focusedSlot": 0,
+      "singleGeometry": null,
+      "rowGeometry": null,
+      "columnGeometry": null,
+      "row3Geometry": null,
+      "column3Geometry": null,
+      "gridGeometry": {
+        "x": 1400,
+        "y": 500,
+        "width": 256,
+        "height": 256,
+        "scaleFactor": 2
+      },
+      "petSize": 64,
+      "alwaysOnTop": true,
+      "locked": false
+    }
   }
 }
 ```
@@ -412,7 +426,7 @@ Rust 侧通过以下命令统一管理窗口模式与桌宠状态：
 - 主窗口与桌宠同时显示。
 - 3×3 以上的桌宠单页布局。
 - 根据窗口尺寸自动切换 1×1/2×2。
-- 新数据到来时自动翻页。
+- 首次有图定位完成后，继续因新数据到来而自动翻页。
 - 用户固定或重排“收藏槽位”。
 - 鼠标穿透及全局快捷键解除穿透。
 - 自动抠图或移除传入图片背景。
@@ -434,9 +448,11 @@ Rust 侧通过以下命令统一管理窗口模式与桌宠状态：
 - 默认桌宠布局为 2×2。
 - 1×1 每页显示一个槽位，1×2/2×1 每页最多显示两个槽位，1×3/3×1 每页最多显示三个槽位，2×2 每页最多显示四个槽位。
 - 首尾分页正确循环。
-- 最后一页不足四个槽位时保留对应空位。
+- 最后一页不足当前布局容量时保留对应空位。
 - 布局切换后保持当前关注槽位。
 - 监控行列减少时不会访问越界槽位。
+- 当前页没有图片时，窗口挂载后首次收到有效图片会定位到首个有图槽位所在页，
+  后续更新不会继续抢占用户当前页。
 
 ### 14.3 窗口状态
 

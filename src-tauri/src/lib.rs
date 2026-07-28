@@ -9,7 +9,7 @@
 // - model.rs             MonitorTile / MonitorState / WindowGeometry / Preferences 数据模型
 // - runtime.rs           Runtime 共享状态、快照/落盘/广播事件、偏好加载
 // - tray.rs              系统托盘、“显示窗口”“开机自启”“退出”菜单、主窗口恢复
-// - commands.rs          5 个 #[tauri::command]，前端唯一的写入入口
+// - commands.rs          全部 #[tauri::command]，前端唯一的 Rust 状态写入入口
 // - device_info.rs       默认设备名、局域网 IP 探测
 // - image.rs              图片格式探测、GIF 循环修正、文件名校验、异步文件探测
 // - window_geometry.rs    窗口几何持久化：可用性判断、恢复与保存
@@ -17,16 +17,17 @@
 // - discovery.rs          UDP 主动发现（纯异步）
 // - mdns.rs                mDNS 服务注册
 // - http/                 基于 Axum 的纯异步 HTTP 服务器：mod.rs 负责路由挂载与共享的
-//                          error_json 错误响应助手，device.rs/images.rs/slots.rs 按资源
+//                          error_json 错误响应助手，device.rs/images.rs/slots.rs/clients.rs 按资源
 //                          拆分处理函数（无额外的子目录嵌套）
 //
-// 三个并发子系统（在 setup 回调里一起启动，共享同一个 Arc<Runtime>）：
+// 后台服务（在 setup 回调里一起启动，共享同一个 Arc<Runtime>）：
 // 1. HTTP 服务器：Axum + Tokio 纯异步实现，提供与 Android 版兼容的 REST API；
 //    没有手写的线程池或阻塞 socket，每个连接由 Tokio 调度到独立的异步任务。
 // 2. UDP 广播发现：tokio::net::UdpSocket 异步监听 8080 端口，响应局域网内的探测广播。
 // 3. mDNS：注册 `_aimonitor._tcp.` 服务，支持 Bonjour/Avahi 风格的服务发现
 //    （`mdns-sd` 内部自带一个常驻线程，这是该第三方库自身的实现方式，不在本项目
 //    "网络层纯异步" 的范围内——我们只负责调用它注册一次）。
+// 4. 心跳租约清理：Tokio 定时任务每 30 秒清理超过 2 分钟未续租的客户端槽位。
 mod commands;
 mod constants;
 mod device_info;
@@ -54,7 +55,7 @@ use tauri::{Manager, WindowEvent};
 use window_geometry::save_window_state;
 use window_manager::{handle_window_moved, handle_window_resized};
 
-// Tauri 应用入口：注册插件、装配 Runtime、启动三个子系统、暴露 Tauri 命令。
+// Tauri 应用入口：注册插件、装配 Runtime、启动后台服务、暴露 Tauri 命令。
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -65,7 +66,7 @@ pub fn run() {
             tray::show_active_window(app);
         }))
         .plugin(tauri_plugin_autostart::Builder::new().build()) // 开机自启插件
-        .plugin(tauri_plugin_opener::init()) // 系统级"用默认程序打开"插件（前端未直接用到，但保留通用能力）
+        .plugin(tauri_plugin_opener::init()) // 设置页通过它把 GitHub 地址交给系统默认浏览器打开
         .setup(|app| {
             use tauri_plugin_autostart::ManagerExt; // 引入 autolaunch() 扩展方法
 
