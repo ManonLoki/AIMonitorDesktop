@@ -1,9 +1,10 @@
 // —— 以下 5 个 #[tauri::command] 是前端唯一能触达 Rust 状态的入口 ——
 // 每个命令的写法都遵循同一套约定：加写锁改状态 → 落盘 preferences → 广播 changed 事件。
-use crate::model::{ImageDisplayMode, MonitorState};
+use crate::model::{AppMode, ImageDisplayMode, MonitorState, PetLayout, WindowState};
 use crate::runtime::SharedRuntime;
 use crate::tray::TrayMenu;
-use tauri::State;
+use crate::window_manager;
+use tauri::{AppHandle, State};
 
 #[tauri::command]
 pub(crate) fn get_monitor_state(runtime: State<'_, SharedRuntime>) -> MonitorState {
@@ -24,8 +25,16 @@ pub(crate) fn set_grid(
         state.rows = rows; // 更新行数
         state.columns = columns; // 更新列数
     } // 写锁在此处离开作用域被释放，之后再落盘/广播，缩短持锁时间
+    {
+        let mut windows = runtime.windows.lock().map_err(|_| "窗口状态不可用")?;
+        windows.pet_window.focused_slot = windows
+            .pet_window
+            .focused_slot
+            .min(rows.saturating_mul(columns) - 1);
+    }
     runtime.save_preferences(); // 持久化到 preferences.json
     runtime.changed(); // 通知前端刷新
+    runtime.window_changed();
     Ok(())
 }
 
@@ -69,4 +78,100 @@ pub(crate) fn set_auto_start(
     runtime.set_auto_start(enabled)?;
     tray_menu.set_auto_start_checked(enabled);
     Ok(())
+}
+
+#[tauri::command]
+pub(crate) fn get_window_state(runtime: State<'_, SharedRuntime>) -> WindowState {
+    runtime.window_snapshot()
+}
+
+#[tauri::command]
+pub(crate) fn switch_app_mode(
+    app: AppHandle,
+    runtime: State<'_, SharedRuntime>,
+    tray_menu: State<'_, TrayMenu>,
+    mode: AppMode,
+) -> Result<(), String> {
+    window_manager::switch_mode(&app, &runtime, mode)?;
+    tray_menu.set_mode(mode);
+    Ok(())
+}
+
+#[tauri::command]
+pub(crate) fn hide_current_window(
+    app: AppHandle,
+    runtime: State<'_, SharedRuntime>,
+) -> Result<(), String> {
+    window_manager::hide_active_window(&app, &runtime)
+}
+
+#[tauri::command]
+pub(crate) fn set_pet_layout(
+    app: AppHandle,
+    runtime: State<'_, SharedRuntime>,
+    layout: PetLayout,
+) -> Result<(), String> {
+    window_manager::set_pet_layout(&app, &runtime, layout)
+}
+
+#[tauri::command]
+pub(crate) fn set_pet_focused_slot(
+    runtime: State<'_, SharedRuntime>,
+    slot: u8,
+) -> Result<(), String> {
+    window_manager::set_pet_focused_slot(&runtime, slot)
+}
+
+#[tauri::command]
+pub(crate) fn set_pet_always_on_top(
+    app: AppHandle,
+    runtime: State<'_, SharedRuntime>,
+    enabled: bool,
+) -> Result<(), String> {
+    window_manager::set_pet_always_on_top(&app, &runtime, enabled)
+}
+
+#[tauri::command]
+pub(crate) fn set_pet_locked(
+    runtime: State<'_, SharedRuntime>,
+    tray_menu: State<'_, TrayMenu>,
+    locked: bool,
+) -> Result<(), String> {
+    window_manager::set_pet_locked(&runtime, locked)?;
+    tray_menu.set_pet_locked_checked(locked);
+    Ok(())
+}
+
+#[tauri::command]
+pub(crate) fn set_pet_scale(
+    app: AppHandle,
+    runtime: State<'_, SharedRuntime>,
+    preset: u16,
+) -> Result<(), String> {
+    window_manager::set_pet_scale(&app, &runtime, preset)
+}
+
+#[tauri::command]
+pub(crate) fn resize_pet_by(
+    app: AppHandle,
+    runtime: State<'_, SharedRuntime>,
+    delta: i16,
+) -> Result<(), String> {
+    window_manager::resize_pet_by(&app, &runtime, delta)
+}
+
+#[tauri::command]
+pub(crate) fn start_pet_drag(
+    app: AppHandle,
+    runtime: State<'_, SharedRuntime>,
+) -> Result<(), String> {
+    window_manager::start_pet_drag(&app, &runtime)
+}
+
+#[tauri::command]
+pub(crate) fn start_pet_resize(
+    app: AppHandle,
+    runtime: State<'_, SharedRuntime>,
+) -> Result<(), String> {
+    window_manager::start_pet_resize(&app, &runtime)
 }

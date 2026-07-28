@@ -11,15 +11,36 @@
     "frontendDist": "../dist"
   },
   "app": {
+    "macOSPrivateApi": true,
     "windows": [
       {
+        "label": "main",
         "title": "AIMonitorDesktop",
         "width": 1280,
         "height": 800,
         "minWidth": 960,
         "minHeight": 640,
         "center": true,
-        "maximized": false
+        "maximized": false,
+        "visible": false
+      },
+      {
+        "label": "pet",
+        "title": "AIMonitorDesktop 桌宠",
+        "url": "index.html?view=pet",
+        "width": 480,
+        "height": 480,
+        "minWidth": 160,
+        "minHeight": 160,
+        "maxWidth": 720,
+        "maxHeight": 720,
+        "visible": false,
+        "transparent": true,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "shadow": false,
+        "resizable": true
       }
     ],
     "security": {

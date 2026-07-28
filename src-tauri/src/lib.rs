@@ -38,14 +38,18 @@ mod model;
 mod runtime;
 mod tray;
 mod window_geometry;
+mod window_manager;
 
 use commands::{
-    get_monitor_state, set_auto_start, set_device_name, set_grid, set_image_display_mode,
+    get_monitor_state, get_window_state, hide_current_window, resize_pet_by, set_auto_start,
+    set_device_name, set_grid, set_image_display_mode, set_pet_always_on_top, set_pet_focused_slot,
+    set_pet_layout, set_pet_locked, set_pet_scale, start_pet_drag, start_pet_resize,
+    switch_app_mode,
 };
 use runtime::{load_preferences, Runtime};
 use std::fs;
 use tauri::{Manager, WindowEvent};
-use window_geometry::{restore_window, save_window_geometry};
+use window_geometry::{clamp_window_to_work_area, keep_pet_square, save_window_state};
 
 // Tauri 应用入口：注册插件、装配 Runtime、启动三个子系统、暴露 Tauri 命令。
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -53,9 +57,9 @@ pub fn run() {
     tauri::Builder::default()
         // 单实例限制：必须是注册的第一个插件（Tauri 官方要求），否则无法保证在
         // 其他插件初始化之前拦截到"已有实例正在运行"这一事件。第二次启动时不再
-        // 创建新窗口/新进程，而是把已运行实例的主窗口取消最小化、显示并置前。
+        // 创建新窗口/新进程，而是恢复当前活动模式的窗口。
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-            tray::show_main_window(app);
+            tray::show_active_window(app);
         }))
         .plugin(tauri_plugin_autostart::Builder::new().build()) // 开机自启插件
         .plugin(tauri_plugin_opener::init()) // 系统级"用默认程序打开"插件（前端未直接用到，但保留通用能力）
@@ -74,9 +78,6 @@ pub fn run() {
                 .autolaunch()
                 .is_enabled()
                 .unwrap_or(preferences.auto_start);
-            if let Some(window) = app.get_webview_window("main") {
-                restore_window(&window, preferences.window.as_ref())?; // 按历史几何或默认策略摆放主窗口
-            }
             let runtime = Runtime::new(
                 app_handle,
                 image_dir,
@@ -87,20 +88,25 @@ pub fn run() {
             );
             runtime.save_preferences(); // 首次落盘，规范化/补全可能缺失的字段
             let tray_menu = tray::setup(app, runtime.clone(), auto_start)?; // 创建托盘菜单并绑定共享状态
-            if let Some(window) = app.get_webview_window("main") {
-                let runtime_for_events = runtime.clone(); // 为窗口事件回调准备独立的 Arc 克隆
+            for label in ["main", "pet"] {
+                let Some(window) = app.get_webview_window(label) else {
+                    continue;
+                };
+                let runtime_for_events = runtime.clone();
                 let window_for_events = window.clone();
                 window.on_window_event(move |event| {
-                    if matches!(
-                        event,
-                        WindowEvent::Moved(_)
-                            | WindowEvent::Resized(_)
-                            | WindowEvent::CloseRequested { .. } // 移动、缩放、即将关闭时都需要记录最新几何
-                    ) {
-                        save_window_geometry(&window_for_events, &runtime_for_events);
+                    if let WindowEvent::Resized(size) = event {
+                        if window_for_events.label() == "pet" {
+                            keep_pet_square(&window_for_events, *size, &runtime_for_events);
+                            clamp_window_to_work_area(&window_for_events);
+                        }
+                        save_window_state(&window_for_events, &runtime_for_events, false);
+                    } else if matches!(event, WindowEvent::Moved(_)) {
+                        save_window_state(&window_for_events, &runtime_for_events, false);
                     }
                     if let WindowEvent::CloseRequested { api, .. } = event {
-                        api.prevent_close(); // 关闭主窗口时保留后台服务和托盘
+                        save_window_state(&window_for_events, &runtime_for_events, true);
+                        api.prevent_close();
                         let _ = window_for_events.hide();
                     }
                 });
@@ -111,7 +117,9 @@ pub fn run() {
             mdns::start_mdns(&runtime); // 注册 mDNS 服务
             runtime.state.write().expect("state lock poisoned").port = port; // 用真实端口覆盖占位值（start_http_server 内部其实已经写过一次，这里是双保险）
             app.manage(tray_menu); // 供设置页命令同步托盘中的“开机自启”勾选状态
-            app.manage(runtime); // 交给 Tauri 管理，之后各 #[tauri::command] 才能通过 State 取到它
+            app.manage(runtime.clone()); // 交给 Tauri 管理，之后各 #[tauri::command] 才能通过 State 取到它
+            window_manager::show_active_window(app.handle(), &runtime)
+                .map_err(std::io::Error::other)?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -119,7 +127,18 @@ pub fn run() {
             set_grid,
             set_image_display_mode,
             set_device_name,
-            set_auto_start
+            set_auto_start,
+            get_window_state,
+            switch_app_mode,
+            hide_current_window,
+            set_pet_layout,
+            set_pet_focused_slot,
+            set_pet_always_on_top,
+            set_pet_locked,
+            set_pet_scale,
+            resize_pet_by,
+            start_pet_drag,
+            start_pet_resize
         ]) // 注册所有可从前端 invoke 调用的命令
         .run(tauri::generate_context!())
         .expect("AIMonitorDesktop 启动失败");

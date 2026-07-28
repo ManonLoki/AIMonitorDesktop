@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import { useState } from "react";
 import { AnimatedContent } from "./components/reactbits/AnimatedContent";
 import { Icon } from "./components/Icon";
@@ -45,6 +46,10 @@ export function MonitorApp() {
           >
             <Icon name="monitor" />
             <span>监控</span>
+          </button>
+          <button title="桌宠模式" onClick={() => void invoke("switch_app_mode", { mode: "pet" })}>
+            <Icon name="pet" />
+            <span>桌宠模式</span>
           </button>
           {/* “设置”导航项：点击切换到设置页 */}
           <button

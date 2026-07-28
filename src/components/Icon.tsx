@@ -1,7 +1,7 @@
 import type { JSX } from "react";
 
 // 支持的图标名称集合，与下方 paths 表的 key 一一对应
-export type IconName = "monitor" | "settings" | "wifi" | "image" | "sidebar";
+export type IconName = "monitor" | "pet" | "settings" | "wifi" | "image" | "sidebar";
 
 // 内联 SVG 线条图标集合，避免引入额外的图标库依赖。
 // 定义在模块作用域（而非组件函数内部），保证同一份 JSX 节点在多次渲染间复用，
@@ -12,6 +12,14 @@ const paths: Record<IconName, JSX.Element> = {
     <>
       <rect x="3" y="4" width="18" height="14" rx="2" /> {/* 屏幕外框 */}
       <path d="M8 22h8M12 18v4" /> {/* 显示器底座 */}
+    </>
+  ),
+  // “桌宠模式”图标：带耳朵的角色头像
+  pet: (
+    <>
+      <path d="M7 9 5 5l4 2M17 9l2-4-4 2" />
+      <path d="M6 13a6 6 0 0 1 12 0v3a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4Z" />
+      <path d="M9.5 13h.01M14.5 13h.01M10 16c1.2 1 2.8 1 4 0" />
     </>
   ),
   // “设置”导航图标：齿轮

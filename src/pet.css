@@ -1,0 +1,206 @@
+html.pet-window, html.pet-window body, html.pet-window #root {
+  color: #fff;
+  background: transparent !important;
+}
+
+.pet-shell {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  outline: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.pet-shell:focus-visible::after {
+  position: absolute;
+  inset: 3px;
+  border: 2px solid rgba(112, 154, 255, .8);
+  border-radius: 18px;
+  content: "";
+  pointer-events: none;
+}
+
+.pet-grid {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  padding: 3%;
+  gap: 2%;
+}
+
+.pet-shell.single .pet-grid { grid-template: 1fr / 1fr; }
+.pet-shell.grid .pet-grid { grid-template: repeat(2, minmax(0, 1fr)) / repeat(2, minmax(0, 1fr)); }
+
+.pet-tile {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  place-items: center;
+  cursor: grab;
+}
+
+.pet-shell.locked .pet-tile { cursor: default; }
+.pet-tile img { width: 100%; height: 100%; display: block; object-fit: contain; pointer-events: none; }
+
+.pet-empty {
+  display: grid;
+  width: 58%;
+  aspect-ratio: 1;
+  place-content: center;
+  justify-items: center;
+  border: 1px dashed rgba(255,255,255,.18);
+  border-radius: 28%;
+  color: rgba(255,255,255,0);
+  background: rgba(15,18,26,0);
+  opacity: 0;
+  transition: opacity .2s ease, color .2s ease, background-color .2s ease;
+}
+
+.pet-shell:hover .pet-empty,
+.pet-shell:has(button:focus-visible) .pet-empty {
+  color: rgba(255,255,255,.62);
+  background: rgba(15,18,26,.25);
+  opacity: 1;
+}
+
+.pet-empty span { font-size: clamp(13px, 5vmin, 22px); font-weight: 750; }
+.pet-empty small { margin-top: 3px; font-size: clamp(8px, 2.5vmin, 11px); }
+
+.pet-info {
+  position: absolute;
+  z-index: 5;
+  right: 4%;
+  bottom: 5%;
+  left: 4%;
+  max-height: 48%;
+  padding: clamp(6px, 2vmin, 10px);
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,.14);
+  border-radius: 11px;
+  color: #fff;
+  background: rgba(12,15,22,.78);
+  box-shadow: 0 8px 24px rgba(0,0,0,.25);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(6px);
+  transition: opacity .18s ease, transform .18s ease;
+  backdrop-filter: blur(10px);
+}
+
+.pet-tile:hover .pet-info,
+.pet-tile:focus-within .pet-info { opacity: 1; transform: translateY(0); }
+.pet-info strong, .pet-info small, .pet-info time { display: block; }
+.pet-info strong { overflow: hidden; font-size: clamp(10px, 3vmin, 13px); text-overflow: ellipsis; white-space: nowrap; }
+.pet-info small, .pet-info time { margin-top: 2px; color: rgba(255,255,255,.66); font-size: clamp(8px, 2.2vmin, 10px); }
+.pet-info p { display: -webkit-box; margin: 5px 0 0; overflow: hidden; font-size: clamp(9px, 2.5vmin, 11px); -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+
+.pet-pager, .pet-menu-trigger, .pet-resize-handle {
+  position: absolute;
+  z-index: 20;
+  opacity: 0;
+  transition: opacity .18s ease, transform .18s ease;
+}
+
+.pet-shell:hover .pet-pager,
+.pet-shell:hover .pet-menu-trigger,
+.pet-shell:hover .pet-resize-handle,
+.pet-shell:has(button:focus-visible) .pet-pager,
+.pet-shell:has(button:focus-visible) .pet-menu-trigger,
+.pet-shell:has(button:focus-visible) .pet-resize-handle { opacity: 1; }
+
+.pet-pager {
+  bottom: 10px;
+  left: 50%;
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  padding: 3px;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 99px;
+  background: rgba(10,13,20,.72);
+  box-shadow: 0 5px 18px rgba(0,0,0,.22);
+  transform: translateX(-50%);
+  backdrop-filter: blur(10px);
+}
+
+.pet-pager button, .pet-menu-trigger {
+  display: grid;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  color: white;
+  background: transparent;
+  cursor: pointer;
+}
+
+.pet-pager button { width: 25px; height: 25px; border-radius: 50%; font-size: 20px; line-height: 1; }
+.pet-pager button:hover, .pet-menu-trigger:hover { background: rgba(255,255,255,.14); }
+.pet-pager span { min-width: 32px; color: rgba(255,255,255,.76); font-size: 10px; text-align: center; }
+
+.pet-menu-trigger {
+  top: 9px;
+  right: 9px;
+  width: 30px;
+  height: 26px;
+  border-radius: 9px;
+  background: rgba(10,13,20,.68);
+  font-size: 12px;
+  letter-spacing: 1px;
+  backdrop-filter: blur(10px);
+}
+
+.pet-resize-handle {
+  right: 5px;
+  bottom: 5px;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: nwse-resize;
+}
+
+.pet-resize-handle::after {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 10px;
+  height: 10px;
+  border-right: 2px solid rgba(255,255,255,.72);
+  border-bottom: 2px solid rgba(255,255,255,.72);
+  content: "";
+}
+
+.pet-context-menu {
+  position: fixed;
+  z-index: 100;
+  width: 182px;
+  padding: 8px;
+  border: 1px solid rgba(255,255,255,.14);
+  border-radius: 13px;
+  color: #eef2fb;
+  background: rgba(19,23,32,.94);
+  box-shadow: 0 14px 38px rgba(0,0,0,.38);
+  font-size: 12px;
+  backdrop-filter: blur(18px);
+}
+
+.pet-context-menu button { border: 0; color: inherit; background: transparent; cursor: pointer; }
+.pet-context-menu > button { display: flex; width: 100%; min-height: 31px; align-items: center; padding: 5px 8px; border-radius: 7px; text-align: left; }
+.pet-context-menu > button:hover { background: rgba(255,255,255,.09); }
+.pet-menu-label { padding: 5px 5px 4px; color: #9099aa; font-size: 10px; }
+.pet-menu-segment, .pet-scale-grid { display: grid; gap: 3px; }
+.pet-menu-segment { grid-template-columns: 1fr 1fr; }
+.pet-scale-grid { grid-template-columns: repeat(4, 1fr); }
+.pet-menu-segment button, .pet-scale-grid button { height: 28px; border-radius: 7px; background: rgba(255,255,255,.06); font-size: 11px; }
+.pet-menu-segment button:hover, .pet-scale-grid button:hover { background: rgba(255,255,255,.11); }
+.pet-menu-segment button.selected, .pet-scale-grid button.selected { color: white; background: #345ec9; }
+.pet-menu-check span { width: 18px; color: #8eb0ff; font-weight: 800; }
+.pet-menu-divider { height: 1px; margin: 6px 2px; background: rgba(255,255,255,.1); }
+
+@media (prefers-reduced-motion: reduce) {
+  .pet-info, .pet-empty, .pet-pager, .pet-menu-trigger, .pet-resize-handle { transition: none; }
+}

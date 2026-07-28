@@ -1,4 +1,4 @@
-// 桌面端运行时状态使用的数据模型：MonitorTile / MonitorState / WindowGeometry / Preferences。
+// 桌面端运行时状态使用的数据模型：监控数据、窗口模式与持久化偏好。
 // 这些类型通过 serde 在 Rust ↔ 前端 JSON 之间转换，字段命名需要和
 // src/types/monitor.ts 中的 TypeScript 类型保持一致（camelCase 由 serde 自动转换而来）。
 use serde::{Deserialize, Serialize};
@@ -17,17 +17,12 @@ pub(crate) struct MonitorTile {
 }
 
 // 图片显示模式：等比缩放（留黑边）或铺满裁剪，序列化为大写下划线风格与 Android 版对齐。
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")] // 序列化为 "FIT_CENTER" / "FILL_CROP"
 pub(crate) enum ImageDisplayMode {
+    #[default]
     FitCenter, // 保持比例完整显示，多余区域留黑边
     FillCrop,  // 保持比例铺满宫格，超出部分裁剪
-}
-
-impl Default for ImageDisplayMode {
-    fn default() -> Self {
-        Self::FitCenter // 默认使用留黑边的等比缩放模式
-    }
 }
 
 // 桌面端运行时的完整状态快照，也是 Tauri 命令 get_monitor_state 的返回值。
@@ -48,13 +43,99 @@ pub(crate) struct MonitorState {
 }
 
 // 窗口位置与尺寸，用于跨会话恢复窗口摆放位置。
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct WindowGeometry {
     pub(crate) x: i32,      // 窗口左上角横坐标（物理像素）
     pub(crate) y: i32,      // 窗口左上角纵坐标（物理像素）
     pub(crate) width: u32,  // 窗口宽度（物理像素）
     pub(crate) height: u32, // 窗口高度（物理像素）
+    #[serde(default)]
+    pub(crate) scale_factor: f64, // 保存时的 DPI 缩放；0 表示来自旧版偏好的物理尺寸
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum AppMode {
+    #[default]
+    Main,
+    Pet,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum PetLayout {
+    Single,
+    #[default]
+    Grid,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct MainWindowPreferences {
+    #[serde(default)]
+    pub(crate) normal_geometry: Option<WindowGeometry>,
+    #[serde(default)]
+    pub(crate) maximized: bool,
+}
+
+fn default_scale_preset() -> u16 {
+    100
+}
+
+fn default_true() -> bool {
+    true
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PetWindowPreferences {
+    #[serde(default)]
+    pub(crate) layout: PetLayout,
+    #[serde(default)]
+    pub(crate) focused_slot: u8,
+    #[serde(default)]
+    pub(crate) single_geometry: Option<WindowGeometry>,
+    #[serde(default)]
+    pub(crate) grid_geometry: Option<WindowGeometry>,
+    #[serde(default = "default_scale_preset")]
+    pub(crate) scale_preset: u16,
+    #[serde(default = "default_true")]
+    pub(crate) always_on_top: bool,
+    #[serde(default)]
+    pub(crate) locked: bool,
+}
+
+impl Default for PetWindowPreferences {
+    fn default() -> Self {
+        Self {
+            layout: PetLayout::Grid,
+            focused_slot: 0,
+            single_geometry: None,
+            grid_geometry: None,
+            scale_preset: default_scale_preset(),
+            always_on_top: true,
+            locked: false,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct WindowPreferences {
+    #[serde(default)]
+    pub(crate) active_mode: AppMode,
+    #[serde(default)]
+    pub(crate) main_window: MainWindowPreferences,
+    #[serde(default)]
+    pub(crate) pet_window: PetWindowPreferences,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct WindowState {
+    pub(crate) active_mode: AppMode,
+    pub(crate) pet_window: PetWindowPreferences,
 }
 
 // 落盘到 preferences.json 的用户偏好，是 MonitorState 的一个持久化子集
@@ -67,8 +148,48 @@ pub(crate) struct Preferences {
     pub(crate) image_display_mode: ImageDisplayMode, // 持久化的图片显示模式
     #[serde(default)] // 旧版本偏好文件里可能没有这个字段，缺省为 false
     pub(crate) auto_start: bool,
-    #[serde(default)] // 旧版本偏好文件里可能没有窗口几何，缺省为 None（走默认摆放逻辑）
-    pub(crate) window: Option<WindowGeometry>,
+    #[serde(default)]
+    pub(crate) windows: WindowPreferences,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) window: Option<WindowGeometry>, // 仅用于迁移 1.1 及更早版本
     pub(crate) device_id: String,   // 持久化的设备 ID，跨重启保持稳定
     pub(crate) device_name: String, // 持久化的设备名称
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn old_preferences_receive_safe_window_defaults() {
+        let preferences: Preferences = serde_json::from_value(serde_json::json!({
+            "rows": 2,
+            "columns": 2,
+            "imageDisplayMode": "FIT_CENTER",
+            "autoStart": false,
+            "window": { "x": 20, "y": 30, "width": 800, "height": 600 },
+            "deviceId": "device",
+            "deviceName": "monitor"
+        }))
+        .expect("legacy preferences should deserialize");
+
+        assert_eq!(preferences.windows.active_mode, AppMode::Main);
+        assert_eq!(preferences.windows.pet_window.layout, PetLayout::Grid);
+        assert!(preferences.windows.pet_window.always_on_top);
+        assert_eq!(
+            preferences.window.expect("legacy geometry").scale_factor,
+            0.0
+        );
+    }
+
+    #[test]
+    fn window_state_uses_frontend_enum_names() {
+        let state = WindowState {
+            active_mode: AppMode::Pet,
+            pet_window: PetWindowPreferences::default(),
+        };
+        let value = serde_json::to_value(state).expect("window state serializes");
+        assert_eq!(value["activeMode"], "pet");
+        assert_eq!(value["petWindow"]["layout"], "grid");
+    }
 }
