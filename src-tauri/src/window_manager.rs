@@ -1,13 +1,14 @@
 //! 两个互斥窗口的显示、模式切换与桌宠交互。
 
 use crate::model::{AppMode, PetLayout, PetWindowPreferences, WindowPreferences};
-use crate::pet_geometry::{apply_pet_constraints, constrain_pet_to_current_monitor, handle_pet_resize};
-use crate::runtime::SharedRuntime;
-use crate::window_geometry::{
-    capture_window_state, restore_main_window, restore_pet_window, PET_PAGER_HEIGHT,
+use crate::pet_geometry::{
+    apply_pet_constraints, constrain_pet_to_current_monitor, handle_pet_resize,
+    logical_pet_window_size, pet_layout_dimensions, physical_pet_window_size,
 };
+use crate::runtime::SharedRuntime;
+use crate::window_geometry::{capture_window_state, restore_main_window, restore_pet_window};
 use std::sync::MutexGuard;
-use tauri::{AppHandle, LogicalSize, Manager, PhysicalPosition, PhysicalSize};
+use tauri::{AppHandle, Manager, PhysicalPosition, PhysicalSize};
 
 const MAIN_LABEL: &str = "main";
 const PET_LABEL: &str = "pet";
@@ -40,10 +41,14 @@ fn label_for_mode(mode: AppMode) -> &'static str {
     }
 }
 
-// 取当前布局对应的已保存几何（single/grid 各自独立一份），恢复窗口位置时用。
+// 取当前布局对应的已保存几何，恢复窗口位置时用。
 fn pet_geometry(preferences: &PetWindowPreferences) -> Option<&crate::model::WindowGeometry> {
     match preferences.layout {
         PetLayout::Single => preferences.single_geometry.as_ref(),
+        PetLayout::Row => preferences.row_geometry.as_ref(),
+        PetLayout::Column => preferences.column_geometry.as_ref(),
+        PetLayout::Row3 => preferences.row3_geometry.as_ref(),
+        PetLayout::Column3 => preferences.column3_geometry.as_ref(),
         PetLayout::Grid => preferences.grid_geometry.as_ref(),
     }
 }
@@ -174,7 +179,7 @@ pub(crate) fn hide_pet_settings(app: &AppHandle) -> Result<(), String> {
         .map_err(|error| error.to_string())
 }
 
-// 单宫格 ⇄ 2×2 宫格切换。用当前窗口位置作为锚点（见下面注释），并把该布局上次
+// 六种宫格布局切换。用当前窗口位置作为锚点（见下面注释），并把该布局上次
 // 保存的尺寸夹到新布局允许的区间；恢复窗口几何失败时把内存状态回滚，
 // 避免“落盘的偏好”和“窗口实际状态”不一致。
 pub(crate) fn set_pet_layout(
@@ -191,10 +196,17 @@ pub(crate) fn set_pet_layout(
     let previous_size = preferences.pet_size;
     // 切换布局时以当前窗口左上角为锚点；不要跳回该布局上一次保存的位置。
     // restore_pet_window 只会在新尺寸越过工作区右侧/下侧时把位置向内收敛。
-    let current_geometry = pet_geometry(&preferences).cloned();
+    let mut current_geometry = pet_geometry(&preferences).cloned();
     preferences.layout = layout;
     let (min, max) = crate::pet_geometry::pet_size_range(&window, layout);
     preferences.pet_size = preferences.pet_size.clamp(min, max); // 旧尺寸可能超出新布局允许的区间
+    if let Some(geometry) = current_geometry.as_mut() {
+        // 只复用旧布局的位置作为锚点；宽高必须按目标布局重算，否则横排切竖排会错误缩小一半。
+        let scale = geometry.scale_factor.max(1.0);
+        let size = physical_pet_window_size(layout, preferences.pet_size, scale);
+        geometry.width = size.width;
+        geometry.height = size.height;
+    }
     {
         let mut windows = windows_lock(runtime)?;
         windows.pet_window.layout = layout;
@@ -266,10 +278,7 @@ pub(crate) fn set_pet_size(
     }
     apply_pet_constraints(&window, layout).map_err(|error| error.to_string())?; // 同步 OS 级别的 min/max，避免下面 set_size 被系统钳制成别的值
     window
-        .set_size(LogicalSize::new(
-            f64::from(size),
-            f64::from(size + PET_PAGER_HEIGHT), // 窗口高度 = 画布 + 底部翻页条
-        ))
+        .set_size(logical_pet_window_size(layout, size))
         .map_err(|error| error.to_string())?;
     windows_lock(runtime)?.pet_window.pet_size = size;
     capture_window_state(&window, runtime); // set_size 后窗口位置可能因为工作区收敛而变化，一并记下来
@@ -295,19 +304,13 @@ pub(crate) fn resize_pet_by(
         .get_webview_window(PET_LABEL)
         .ok_or_else(|| "桌宠窗口不存在".to_string())?;
     let scale = window.scale_factor().map_err(|error| error.to_string())?;
-    let current = f64::from(
-        window
-            .inner_size()
-            .map_err(|error| error.to_string())?
-            .width, // 正方形窗口宽=高，用宽度即可代表当前画布边长（物理像素，下面换算成逻辑像素）
-    ) / scale;
+    let current_size = window.inner_size().map_err(|error| error.to_string())?;
+    let (_, columns) = pet_layout_dimensions(layout);
+    let current = f64::from(current_size.width) / f64::from(columns) / scale;
     let (min, max) = crate::pet_geometry::pet_size_range(&window, layout);
     let pet_size = (current + f64::from(delta)).clamp(f64::from(min), f64::from(max));
     window
-        .set_size(LogicalSize::new(
-            pet_size,
-            pet_size + f64::from(PET_PAGER_HEIGHT),
-        ))
+        .set_size(logical_pet_window_size(layout, pet_size.round() as u16))
         .map_err(|error| error.to_string())?;
     windows_lock(runtime)?.pet_window.pet_size = pet_size.round() as u16;
     capture_window_state(&window, runtime);

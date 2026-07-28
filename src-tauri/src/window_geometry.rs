@@ -2,13 +2,15 @@
 //! 桌宠尺寸约束/跨显示器收敛的数学在 pet_geometry.rs（职责分开，避免单文件超过 400 行）。
 
 use crate::model::{MainWindowPreferences, PetLayout, WindowGeometry};
-use crate::pet_geometry::{apply_pet_constraints, pet_size_range_for_monitor, physical_pet_window_size};
+use crate::pet_geometry::{
+    apply_pet_constraints, pet_layout_dimensions, pet_size_range_for_monitor,
+    physical_pet_window_size,
+};
 use crate::runtime::SharedRuntime;
 use tauri::{PhysicalPosition, PhysicalSize, WebviewWindow};
 
 const MAIN_LABEL: &str = "main";
 const PET_LABEL: &str = "pet";
-pub(crate) const PET_PAGER_HEIGHT: u16 = 24;
 // 判断上次保存的窗口矩形是否还落在这块显示器上：显示器被拔掉/换分辨率后，
 // 保存的坐标可能落在虚空里，这时应该改用默认位置而不是把窗口摆到看不见的地方。
 // 用 i64 计算是因为 x+width 这类求和在极端坐标下可能超出 i32 范围。
@@ -144,13 +146,11 @@ pub(crate) fn restore_pet_window(
             let saved_size = size_for_scale(geometry, monitor.scale_factor());
             let (min, max) = pet_size_range_for_monitor(monitor, layout);
             let scale = monitor.scale_factor();
-            let footer = (f64::from(PET_PAGER_HEIGHT) * scale).round() as u32; // 翻页条高度换算成物理像素
-            // 保存的宽/高可能因为四舍五入不完全相等，取更大的一边（扣掉翻页条后）作为画布边长。
-            let requested_canvas = saved_size
-                .width
-                .max(saved_size.height.saturating_sub(footer));
-            let canvas_size = (f64::from(requested_canvas) / scale).round() as u16;
-            let size = physical_pet_window_size(canvas_size.clamp(min, max), scale);
+            // 从窗口实际宽度反推单格边长，可自然迁移旧版“整体画布尺寸”的持久化几何。
+            let (_, columns) = pet_layout_dimensions(layout);
+            let cell_size = f64::from(saved_size.width) / f64::from(columns);
+            let pet_size = (cell_size / scale).round() as u16;
+            let size = physical_pet_window_size(layout, pet_size.clamp(min, max), scale);
             window.set_size(size)?;
             window.set_position(clamped_position(
                 geometry.x,
@@ -170,7 +170,7 @@ pub(crate) fn restore_pet_window(
         .ok_or_else(|| tauri::Error::FailedToReceiveMessage)?;
     let (min, max) = pet_size_range_for_monitor(&monitor, layout);
     let scale = monitor.scale_factor();
-    let size = physical_pet_window_size(pet_size.clamp(min, max), scale);
+    let size = physical_pet_window_size(layout, pet_size.clamp(min, max), scale);
     let area = monitor.work_area();
     let margin = (16.0 * scale).round() as i32; // 16 逻辑像素的贴边距，避免正好贴住屏幕边缘
     window.set_size(size)?;
@@ -206,12 +206,16 @@ pub(crate) fn capture_window_state(window: &WebviewWindow, runtime: &SharedRunti
         height: size.height,
         scale_factor: window.scale_factor().unwrap_or(1.0),
     };
-    // 主窗口只有一份几何；桌宠窗口按当前布局分别保存到 single/grid 两个槽位，
+    // 主窗口只有一份几何；桌宠窗口按当前布局分别保存到六个槽位，
     // 这样切换布局后各自都能恢复到上次的位置，不会互相覆盖。
     match window.label() {
         MAIN_LABEL => windows.main_window.normal_geometry = Some(geometry),
         PET_LABEL => match windows.pet_window.layout {
             PetLayout::Single => windows.pet_window.single_geometry = Some(geometry),
+            PetLayout::Row => windows.pet_window.row_geometry = Some(geometry),
+            PetLayout::Column => windows.pet_window.column_geometry = Some(geometry),
+            PetLayout::Row3 => windows.pet_window.row3_geometry = Some(geometry),
+            PetLayout::Column3 => windows.pet_window.column3_geometry = Some(geometry),
             PetLayout::Grid => windows.pet_window.grid_geometry = Some(geometry),
         },
         _ => {} // pet-settings 窗口不持久化几何，每次都重新居中显示

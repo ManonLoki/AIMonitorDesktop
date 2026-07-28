@@ -49,6 +49,30 @@ export function PetContextMenu({
           1×1
         </button>
         <button
+          className={preferences.layout === "row" ? "selected" : ""}
+          onClick={() => onLayout("row")}
+        >
+          1×2
+        </button>
+        <button
+          className={preferences.layout === "column" ? "selected" : ""}
+          onClick={() => onLayout("column")}
+        >
+          2×1
+        </button>
+        <button
+          className={preferences.layout === "row3" ? "selected" : ""}
+          onClick={() => onLayout("row3")}
+        >
+          1×3
+        </button>
+        <button
+          className={preferences.layout === "column3" ? "selected" : ""}
+          onClick={() => onLayout("column3")}
+        >
+          3×1
+        </button>
+        <button
           className={preferences.layout === "grid" ? "selected" : ""}
           onClick={() => onLayout("grid")}
         >

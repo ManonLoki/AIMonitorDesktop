@@ -1,5 +1,5 @@
 export type AppMode = "main" | "pet";
-export type PetLayout = "single" | "grid";
+export type PetLayout = "single" | "row" | "column" | "row3" | "column3" | "grid";
 
 export interface WindowGeometry {
   x: number;
@@ -13,6 +13,10 @@ export interface PetWindowPreferences {
   layout: PetLayout;
   focusedSlot: number;
   singleGeometry?: WindowGeometry | null;
+  rowGeometry?: WindowGeometry | null;
+  columnGeometry?: WindowGeometry | null;
+  row3Geometry?: WindowGeometry | null;
+  column3Geometry?: WindowGeometry | null;
   gridGeometry?: WindowGeometry | null;
   petSize: number;
   alwaysOnTop: boolean;
@@ -35,6 +39,6 @@ export const previewWindowState: WindowState = {
     alwaysOnTop: true,
     locked: false,
   },
-  petSizeMin: 256,
-  petSizeMax: 540,
+  petSizeMin: 32,
+  petSizeMax: 180,
 };

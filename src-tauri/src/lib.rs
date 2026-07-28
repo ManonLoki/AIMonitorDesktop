@@ -69,6 +69,9 @@ pub fn run() {
         .setup(|app| {
             use tauri_plugin_autostart::ManagerExt; // 引入 autolaunch() 扩展方法
 
+            #[cfg(target_os = "macos")]
+            app.set_dock_visibility(false); // 常驻入口是菜单栏托盘，macOS 不再额外显示 Dock 图标
+
             let app_handle = app.handle().clone(); // 克隆一份句柄供 Runtime 长期持有
             let config_dir = app.path().app_config_dir()?; // 应用配置目录，存放 preferences.json
             let cache_dir = app.path().app_cache_dir()?; // 应用缓存目录，存放上传的图片

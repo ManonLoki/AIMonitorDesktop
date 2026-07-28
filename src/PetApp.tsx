@@ -1,8 +1,17 @@
-import { useEffect, useMemo, useRef, type MouseEvent, type WheelEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent, type WheelEvent } from "react";
 import { useMonitorState } from "./hooks/useMonitorState";
 import { useWindowState } from "./hooks/useWindowState";
 import { call } from "./lib/tauri";
 import { buildImageUrl, type MonitorTile } from "./types/monitor";
+
+const LAYOUT_CAPACITY = {
+  single: 1,
+  row: 2,
+  column: 2,
+  row3: 3,
+  column3: 3,
+  grid: 4,
+} as const;
 
 // 桌宠里的单个宫格：有图片时只显示图片 + 悬浮标签，没有数据时显示序号占位。
 function PetTile({ tile, index, imageUrl }: {
@@ -35,8 +44,9 @@ export function PetApp() {
   const { state: monitor } = useMonitorState(); // 宫格数据（rows/columns/tiles），跟主窗口共享同一份状态
   const { state: windows } = useWindowState(); // 桌宠自己的窗口偏好（布局/锁定/焦点槽位等）
   const preferences = windows.petWindow;
+  const [isHovered, setIsHovered] = useState(false);
   const lastWheelAt = useRef(0); // 滚轮事件节流用的时间戳，避免触控板连续触发过多命令
-  const capacity = preferences.layout === "single" ? 1 : 4; // 单宫格布局每页 1 格，2×2 布局每页 4 格
+  const capacity = LAYOUT_CAPACITY[preferences.layout];
   const visibleSlotCount = Math.max(1, monitor.rows * monitor.columns); // 当前行列数下实际有效的宫格数
   const pageCount = Math.max(1, Math.ceil(visibleSlotCount / capacity));
   // focusedSlot 是后端持久化的“当前聚焦第几个宫格”，换算成页码；行列数变小后可能越界，用 min 收敛。
@@ -48,6 +58,11 @@ export function PetApp() {
     () => Array.from({ length: capacity }, (_, offset) => pageStart + offset),
     [capacity, pageStart],
   );
+  const firstImageSlot = monitor.tiles
+    .slice(0, visibleSlotCount)
+    .findIndex((tile) => Boolean(tile?.imageFilename));
+  const pageHasImage = pageSlots.some((slot) => Boolean(monitor.tiles[slot]?.imageFilename));
+  const ensuredVisiblePage = useRef(false);
 
   // 跳到指定页：页码取模实现首尾循环翻页（最后一页下一页回到第一页）。
   const focusPage = (nextPage: number) => {
@@ -99,13 +114,30 @@ export function PetApp() {
       if (event.key === "ArrowLeft") turnPageRef.current(-1);
       if (event.key === "ArrowRight") turnPageRef.current(1);
     };
+    const hideControls = () => setIsHovered(false);
     window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+    window.addEventListener("blur", hideControls);
+    document.addEventListener("mouseleave", hideControls);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("blur", hideControls);
+      document.removeEventListener("mouseleave", hideControls);
+    };
   }, []); // 空依赖：只挂载一次，避免 monitor-state-changed 等高频重渲染反复重新绑定全局监听
+
+  useEffect(() => {
+    if (ensuredVisiblePage.current || firstImageSlot < 0) return;
+    ensuredVisiblePage.current = true;
+    if (!pageHasImage) {
+      void call("set_pet_focused_slot", { slot: firstImageSlot });
+    }
+  }, [firstImageSlot, pageHasImage]);
 
   return (
     <main
-      className={`pet-shell ${preferences.layout}${preferences.locked ? " locked" : ""}`}
+      className={`pet-shell ${preferences.layout}${preferences.locked ? " locked" : ""}${isHovered ? " hovered" : ""}${pageHasImage ? "" : " empty-page"}`}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
       onMouseDown={onMouseDown}
       onDoubleClick={onDoubleClick}
       onWheel={onWheel}
@@ -123,11 +155,12 @@ export function PetApp() {
         })}
       </div>
 
-      <div className="pet-pager" data-pet-control>
+      <div className="pet-pager" data-pet-control aria-hidden={!isHovered}>
         <button
           aria-label="上一页"
           title="上一页"
           disabled={pageCount <= 1}
+          tabIndex={isHovered ? 0 : -1}
           onClick={() => turnPage(-1)}
         >‹</button>
         <span>{pageIndex + 1}/{pageCount}</span>
@@ -135,6 +168,7 @@ export function PetApp() {
           aria-label="下一页"
           title="下一页"
           disabled={pageCount <= 1}
+          tabIndex={isHovered ? 0 : -1}
           onClick={() => turnPage(1)}
         >›</button>
       </div>

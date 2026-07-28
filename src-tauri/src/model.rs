@@ -66,6 +66,10 @@ pub(crate) enum AppMode {
 #[serde(rename_all = "camelCase")]
 pub(crate) enum PetLayout {
     Single,
+    Row,
+    Column,
+    Row3,
+    Column3,
     #[default]
     Grid,
 }
@@ -97,6 +101,14 @@ pub(crate) struct PetWindowPreferences {
     #[serde(default)]
     pub(crate) single_geometry: Option<WindowGeometry>,
     #[serde(default)]
+    pub(crate) row_geometry: Option<WindowGeometry>,
+    #[serde(default)]
+    pub(crate) column_geometry: Option<WindowGeometry>,
+    #[serde(default)]
+    pub(crate) row3_geometry: Option<WindowGeometry>,
+    #[serde(default)]
+    pub(crate) column3_geometry: Option<WindowGeometry>,
+    #[serde(default)]
     pub(crate) grid_geometry: Option<WindowGeometry>,
     #[serde(default = "default_pet_size")]
     pub(crate) pet_size: u16,
@@ -112,6 +124,10 @@ impl Default for PetWindowPreferences {
             layout: PetLayout::Grid,
             focused_slot: 0,
             single_geometry: None,
+            row_geometry: None,
+            column_geometry: None,
+            row3_geometry: None,
+            column3_geometry: None,
             grid_geometry: None,
             pet_size: default_pet_size(),
             always_on_top: true,
@@ -195,5 +211,7 @@ mod tests {
         let value = serde_json::to_value(state).expect("window state serializes");
         assert_eq!(value["activeMode"], "pet");
         assert_eq!(value["petWindow"]["layout"], "grid");
+        assert_eq!(serde_json::to_value(PetLayout::Row3).unwrap(), "row3");
+        assert_eq!(serde_json::to_value(PetLayout::Column3).unwrap(), "column3");
     }
 }
