@@ -22,6 +22,11 @@ Override the macOS target with `AIMONITOR_MAC_TARGET=aarch64-apple-darwin` or `A
 
 Common: Node.js 22.12+, pnpm 10, Rust stable, installed frontend dependencies.
 
+macOS signing uses the Developer ID identity declared in
+`src-tauri/tauri.macos.conf.json` and installed in the login keychain. Notarization
+is enabled by Tauri when either its Apple ID app-specific password variables or
+App Store Connect API key variables are also present.
+
 macOS host:
 
 ```bash
@@ -56,4 +61,8 @@ On Linux, install LLVM or LLD and NSIS with the system package manager, then ins
 - Missing `cargo-xwin`: install it with Cargo.
 - Missing Apple target: use `rustup target add`.
 - No installer in `publish/`: read the earlier build failure. The script leaves the previous `publish/` intact until all requested builds succeed.
-- Signing warning: expected for local cross-platform builds. Signing and notarization require separately managed credentials.
+- Missing macOS signing identity: install the Developer ID Application certificate,
+  including its private key, in the login keychain and keep the identity in
+  `tauri.macos.conf.json` synchronized with that certificate.
+- A signed but unnotarized macOS artifact means notarization credentials were not
+  supplied. Keep those credentials outside the repository.

@@ -3,6 +3,10 @@
   "bundle": {
     "targets": [
       "dmg"
-    ]
+    ],
+    "macOS": {
+      "signingIdentity": "Developer ID Application: Manon Loki (GKVE4TEFQ6)",
+      "hardenedRuntime": true
+    }
   }
 }

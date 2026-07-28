@@ -27,7 +27,11 @@ Use the repository-owned release script instead of assembling Tauri commands man
 - Do not use WiX or MSI for xwin builds. Cross-platform packaging is NSIS-only.
 - Do not remove `mainBinaryName`; it guarantees the executable is named `AIMonitorDesktop`.
 - Do not bypass missing `cargo-xwin`, `makensis`, or `llvm-rc`. Report the missing prerequisite and use the setup command in the reference.
-- Do not claim Windows signing or Apple notarization. The local release commands intentionally build unsigned artifacts with `--no-sign`.
+- Do not claim Windows signing; xwin builds remain unsigned until a separate
+  Authenticode certificate and signing command are configured.
+- Do not claim Apple notarization unless the build log and artifact verification
+  confirm it. macOS release builds are Developer ID signed, while notarization
+  additionally requires separately managed Apple credentials.
 
 ## Verification
 

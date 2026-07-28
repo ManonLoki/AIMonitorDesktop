@@ -86,11 +86,12 @@ function buildMac() {
     ...process.env,
     CARGO_TARGET_DIR: projectCargoTargetDir,
   };
-  run("pnpm", ["tauri", "build", "--target", target, "--ci", "--no-sign"], env);
+  run("pnpm", ["tauri", "build", "--target", target, "--ci"], env);
   const source = newestArtifact(
     join(tauriRoot, "target", target, "release", "bundle", "dmg"),
     ".dmg",
   );
+  run("codesign", ["--verify", "--strict", "--verbose=2", source], env);
   const architecture = target === "universal-apple-darwin"
     ? "universal"
     : target.startsWith("aarch64")
