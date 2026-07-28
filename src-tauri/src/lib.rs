@@ -8,6 +8,7 @@
 // - constants.rs        跨模块共享的常量（端口、上限、API 版本）
 // - model.rs             MonitorTile / MonitorState / WindowGeometry / Preferences 数据模型
 // - runtime.rs           Runtime 共享状态、快照/落盘/广播事件、偏好加载
+// - tray.rs              系统托盘、“显示窗口”“开机自启”“退出”菜单、主窗口恢复
 // - commands.rs          5 个 #[tauri::command]，前端唯一的写入入口
 // - device_info.rs       默认设备名、局域网 IP 探测
 // - image.rs              图片格式探测、GIF 循环修正、文件名校验、异步文件探测
@@ -35,6 +36,7 @@ mod image;
 mod mdns;
 mod model;
 mod runtime;
+mod tray;
 mod window_geometry;
 
 use commands::{
@@ -53,11 +55,7 @@ pub fn run() {
         // 其他插件初始化之前拦截到"已有实例正在运行"这一事件。第二次启动时不再
         // 创建新窗口/新进程，而是把已运行实例的主窗口取消最小化、显示并置前。
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.unminimize(); // 若已最小化，先恢复正常大小
-                let _ = window.show(); // 若窗口曾被隐藏，重新显示
-                let _ = window.set_focus(); // 置于最前并获得输入焦点
-            }
+            tray::show_main_window(app);
         }))
         .plugin(tauri_plugin_autostart::Builder::new().build()) // 开机自启插件
         .plugin(tauri_plugin_opener::init()) // 系统级"用默认程序打开"插件（前端未直接用到，但保留通用能力）
@@ -88,6 +86,7 @@ pub fn run() {
                 app.package_info().version.to_string(), // 从 Tauri 打包信息读取版本号
             );
             runtime.save_preferences(); // 首次落盘，规范化/补全可能缺失的字段
+            let tray_menu = tray::setup(app, runtime.clone(), auto_start)?; // 创建托盘菜单并绑定共享状态
             if let Some(window) = app.get_webview_window("main") {
                 let runtime_for_events = runtime.clone(); // 为窗口事件回调准备独立的 Arc 克隆
                 let window_for_events = window.clone();
@@ -100,6 +99,10 @@ pub fn run() {
                     ) {
                         save_window_geometry(&window_for_events, &runtime_for_events);
                     }
+                    if let WindowEvent::CloseRequested { api, .. } = event {
+                        api.prevent_close(); // 关闭主窗口时保留后台服务和托盘
+                        let _ = window_for_events.hide();
+                    }
                 });
             }
             let port = http::start_http_server(runtime.clone()); // 启动 HTTP 服务器并拿到实际绑定端口
@@ -107,6 +110,7 @@ pub fn run() {
             discovery::start_udp_discovery(runtime.clone()); // 启动 UDP 探测响应线程
             mdns::start_mdns(&runtime); // 注册 mDNS 服务
             runtime.state.write().expect("state lock poisoned").port = port; // 用真实端口覆盖占位值（start_http_server 内部其实已经写过一次，这里是双保险）
+            app.manage(tray_menu); // 供设置页命令同步托盘中的“开机自启”勾选状态
             app.manage(runtime); // 交给 Tauri 管理，之后各 #[tauri::command] 才能通过 State 取到它
             Ok(())
         })

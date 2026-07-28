@@ -11,6 +11,7 @@ use std::{
     sync::{Arc, Mutex, RwLock},
 };
 use tauri::{AppHandle, Emitter};
+use tauri_plugin_autostart::ManagerExt;
 use uuid::Uuid;
 
 // 贯穿三个子系统共享的运行时上下文，以 Arc 的形式在线程间传递。
@@ -94,6 +95,20 @@ impl Runtime {
     // 通知前端状态已变化；前端收到后会重新调用 get_monitor_state 拉取最新快照。
     pub(crate) fn changed(&self) {
         let _ = self.app.emit("monitor-state-changed", ()); // 事件无载荷，前端收到后自行重新拉取全量状态
+    }
+
+    // 修改操作系统的开机自启注册项，并同步内存状态、偏好文件和前端展示。
+    pub(crate) fn set_auto_start(&self, enabled: bool) -> Result<(), String> {
+        let manager = self.app.autolaunch();
+        if enabled {
+            manager.enable().map_err(|error| error.to_string())?;
+        } else {
+            manager.disable().map_err(|error| error.to_string())?;
+        }
+        self.state.write().map_err(|_| "状态不可用")?.auto_start = enabled;
+        self.save_preferences();
+        self.changed();
+        Ok(())
     }
 
     // 续租控制端心跳；HTTP 端两个入口（心跳接口、更新槽位）共用同一处加锁逻辑。
