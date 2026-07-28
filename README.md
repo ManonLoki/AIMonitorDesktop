@@ -1,96 +1,129 @@
 # AIMonitorDesktop
 
-AI监控平台桌面版，由 ManonLoki 开发。
+English | [简体中文](./Readme_zh.md)
 
-当前版本：`2.0.3`。本版本以多原生窗口、Rust 统一窗口状态和桌宠模式为新架构基线。
+A desktop monitoring client for displaying and managing AI task status across a
+local network, developed by ManonLoki.
 
-局域网 HTTP API 当前为 v3。槽位更新必须携带控制端 `clientId`，并通过
-`POST /api/clients/{clientId}/heartbeat` 每 30 秒续租；连续 2 分钟未续租时，
-桌面端只清理该控制端拥有的宫格。
+Current version: `2.0.3`. The current architecture is built around multiple
+native windows, a Rust-owned shared runtime state, desktop pet mode, and a
+bilingual English/Chinese interface.
 
-## 实机截图
+The LAN HTTP API is currently v3. Slot updates must include the controller's
+`clientId`. Controllers renew their leases every 30 seconds through
+`POST /api/clients/{clientId}/heartbeat`; after two minutes without a heartbeat,
+the desktop app clears only the slots owned by that controller.
 
-### 监控界面
+## Screenshots
 
-![AIMonitorDesktop macOS 实机运行界面](./docs/screenshots/monitor-dashboard.jpg)
+### Monitor dashboard
 
-> macOS 实机运行效果：2 × 2 监控宫格，其中一个终端正在上报内容。
+![AIMonitorDesktop 2.0.3 monitor dashboard](./docs/screenshots/en/monitor-dashboard.jpg)
 
-### 设置界面
+> The current 2 × 2 monitor grid. When data is available, a slot displays the
+> character image, name, status, and last update time.
 
-![AIMonitorDesktop macOS 设置界面](./docs/screenshots/settings.jpg)
+### Settings
 
-> 可配置开机自启、设备名称、监控宫格和画布图片显示方式，并查看局域网服务信息。
+![AIMonitorDesktop 2.0.3 settings](./docs/screenshots/en/settings.jpg)
 
-### 桌宠界面
+> Switch the interface language, configure launch at login, device identity,
+> grid dimensions, and image scaling, and inspect version and LAN service
+> information.
 
-![AIMonitorDesktop macOS 桌宠模式](./docs/screenshots/desktop-pet.jpg)
+### Desktop pet
 
-> 桌宠模式将监控角色以透明、无边框窗口常驻桌面，并提供循环分页与快捷模式切换。
+![AIMonitorDesktop desktop pet mode](./docs/screenshots/en/desktop-pet.jpg)
 
-## 桌宠模式
+> Desktop pet mode keeps monitored characters in a transparent, borderless
+> window, with paginated layouts and quick mode switching.
 
-桌宠模式是主监控界面的轻量桌面展示形态，直接复用监控槽位中的角色图片和
-Rust 运行时状态，不改变局域网 API 或 25 个槽位的协议。
+## Desktop pet mode
 
-- 主界面与桌宠窗口互斥显示，切换或重启后恢复上次模式。
-- 支持 `1×1`、`1×2`、`2×1`、`1×3`、`3×1` 和 `2×2` 布局，适配 1～4 个 AI 展示并循环分页。
-- 普通滚轮翻页，`Ctrl/Command + 滚轮`缩放，双击非控制区域返回主界面。
-- 右键打开独立桌宠设置窗口；窗口在桌宠当前所在显示器居中，可调整布局、连续
-  尺寸、始终置顶和位置锁定。
-- 每个桌宠单元保持正方形；底部分页条悬浮在画布上，仅在鼠标位于窗口内时显示。
-- 尺寸统一表示单格边长，最小 32px；窗口按单格尺寸乘以行列数生成，长边最大为屏幕逻辑最短边的四分之一。
-- 尺寸按当前显示器工作区与 DPI 动态限制，跨显示器时自动收敛到可操作范围。
-- 六种桌宠布局分别持久化几何状态；macOS 切换同一显示器的桌面空间时桌宠保持可见。
-- macOS 仅保留菜单栏托盘入口，不在 Dock 中显示额外图标。
-- 托盘菜单随模式精简：看板模式依次提供“桌宠模式 / 显示看板”，桌宠模式依次
-  提供“看板模式 / 锁定桌宠”；两种模式均保留“开机自启 / 退出”。
+Desktop pet mode is a lightweight presentation of the main dashboard. It reuses
+the character images and Rust runtime state from the monitor slots without
+changing the LAN API or its 25-slot protocol.
 
-完整且与当前实现同步的交互、窗口、持久化与验收基线见
-[桌宠模式设计](./docs/DESKTOP_PET_MODE_DESIGN.md)。
+- The dashboard and desktop pet windows are mutually exclusive, and the last
+  active mode is restored after switching or restarting.
+- The supported layouts are `1×1`, `1×2`, `2×1`, `1×3`, `3×1`, and `2×2`.
+  They display one to four AI characters at a time and paginate when needed.
+- Use the mouse wheel to turn pages. Hold `Ctrl`/`Command` while scrolling to
+  resize, or double-click a non-control area to return to the dashboard.
+- Right-click to open a dedicated settings window centered on the desktop pet's
+  current display. It controls the layout, continuous size, always-on-top
+  behavior, and position lock.
+- Every pet cell remains square. The pager floats above the canvas and appears
+  only while the pointer is inside the window.
+- Size represents the edge length of one cell, with a minimum of 32 px. Window
+  dimensions are calculated from cell size and layout, and the longest edge is
+  capped at one quarter of the display's logical shortest edge.
+- Size limits adapt to the current display's work area and DPI, and are
+  constrained automatically when the window moves between displays.
+- Geometry is persisted separately for all six layouts. On macOS, the desktop
+  pet remains visible when switching Spaces on the same display.
+- On macOS, the app uses only its menu bar tray entry and does not add an extra
+  Dock icon.
+- The tray menu follows the active mode. Dashboard mode offers “Desktop pet
+  mode / Show dashboard”; desktop pet mode offers “Dashboard mode / Lock
+  desktop pet.” Both include “Launch at login / Quit.”
 
-## 技术栈
+The complete interaction, window, persistence, and acceptance baseline is
+documented in [Desktop Pet Mode Design](./docs/DESKTOP_PET_MODE_DESIGN.md)
+(Chinese).
 
-- 桌面框架：Tauri 2
-- 前端框架：React 19 + TypeScript
-- UI 动效：React Bits + GSAP
-- 状态控制通路：`@tauri-apps/api`（invoke / event）；图片内容通过内置 HTTP 服务的回环地址读取
-- 构建工具：Vite 8
-- 包管理器：pnpm（依赖使用精确版本并提交锁文件）
+## Tech stack
 
-具体选型边界见 [TECH_STACK.md](./TECH_STACK.md)。
+- Desktop framework: Tauri 2
+- Frontend: React 19 + TypeScript
+- UI motion: React Bits + GSAP
+- State control path: `@tauri-apps/api` (`invoke` / events); images are loaded
+  from the built-in HTTP service through a loopback URL
+- Build tool: Vite 8
+- Package manager: pnpm, with exact dependency versions and a committed lockfile
 
-React Bits 组件以可维护源码方式放在 `src/components/reactbits/`，并针对桌面端交互与系统“减少动态效果”偏好做了适配。上游许可见 [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md)。
+The dashboard, settings page, desktop pet window, desktop pet settings window,
+and tray menu support both English and Simplified Chinese. The language can
+follow the operating system or be selected manually.
 
-## 环境要求
+See [TECH_STACK.md](./TECH_STACK.md) (Chinese) for detailed technology
+boundaries.
+
+React Bits components are maintained as source under
+`src/components/reactbits/` and have been adapted for desktop interaction and
+the operating system's reduced-motion preference. See
+[THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md) for upstream notices.
+
+## Requirements
 
 - Node.js >= 22.12
 - pnpm 10
-- Rust stable
-- Tauri 对应平台依赖
+- Stable Rust
+- The platform prerequisites required by Tauri
 
-## 开发
+## Development
 
 ```bash
 pnpm install
 pnpm run dev
 ```
 
-启动桌面应用：
+Start the desktop application:
 
 ```bash
 pnpm run tauri dev
 ```
 
-## 发布构建（维护者手册）
+## Release builds (maintainer guide)
 
-发布入口已经集成到 Tauri 构建流程中，不需要再手工运行独立的签名或公证脚本。
-macOS 包只有在 Developer ID 签名、公证、票据装订和 Gatekeeper 校验全部通过后，
-才会进入 `publish/`。
+Release handling is integrated into the Tauri build workflow. Separate manual
+signing or notarization scripts are not required. A macOS package is copied into
+`publish/` only after Developer ID signing, notarization, ticket stapling, and
+Gatekeeper verification all succeed.
 
-### 首次配置构建机
+### One-time build machine setup
 
-安装项目依赖和 Rust 目标：
+Install project dependencies and Rust targets:
 
 ```bash
 pnpm install
@@ -98,22 +131,23 @@ rustup target add aarch64-apple-darwin x86_64-apple-darwin
 rustup target add x86_64-pc-windows-msvc
 ```
 
-macOS 钥匙串中必须安装有效的 `Developer ID Application` 证书及其私钥。可用
-以下命令检查签名身份：
+The macOS keychain must contain a valid `Developer ID Application` certificate
+and its private key. Check available signing identities with:
 
 ```bash
 security find-identity -v -p codesigning
 ```
 
-Windows 交叉构建还需要 `cargo-xwin`、NSIS 和 LLVM：
+Cross-building Windows also requires `cargo-xwin`, NSIS, and LLVM:
 
 ```bash
 brew install llvm nsis
 cargo install --locked cargo-xwin
 ```
 
-创建 Developer 权限的 App Store Connect API Key，将下载的 `.p8` 私钥保存到
-本机安全目录，再把公证凭据写入钥匙串。尖括号内容必须替换为自己的值：
+Create an App Store Connect API key with the Developer role, store the downloaded
+`.p8` key in a secure local directory, and save the notarization credentials in
+the keychain. Replace every angle-bracket placeholder with your own value:
 
 ```bash
 mkdir -p "$HOME/.appstoreconnect/private_keys"
@@ -126,94 +160,103 @@ xcrun notarytool store-credentials AIMonitorNotary \
   --issuer "<ISSUER_ID>"
 ```
 
-验证钥匙串凭据是否可用：
+Verify the stored credentials:
 
 ```bash
 xcrun notarytool history --keychain-profile AIMonitorNotary
 ```
 
-证书、证书私钥、API Key、`.p8` 文件和 Issuer ID 都不得提交到仓库。若使用了
-其他 profile 名称，构建前设置 `AIMONITOR_NOTARY_PROFILE`。也可以使用 Tauri
-支持的 `APPLE_API_KEY`、`APPLE_API_ISSUER` 和 `APPLE_API_KEY_PATH` 环境变量，
-但日常发布推荐使用钥匙串 profile，避免密钥出现在终端历史或 CI 日志中。
+Never commit certificates, certificate private keys, API keys, `.p8` files, or
+the Issuer ID. If you use a different profile name, set
+`AIMONITOR_NOTARY_PROFILE` before building. Tauri's `APPLE_API_KEY`,
+`APPLE_API_ISSUER`, and `APPLE_API_KEY_PATH` environment variables are also
+supported, but a keychain profile is recommended for routine releases so that
+secrets do not appear in shell history or CI logs.
 
-### 每次发布
+### Each release
 
-1. 同步修改 `package.json`、`src-tauri/Cargo.toml`、
-   `src-tauri/Cargo.lock` 和 `src-tauri/tauri.conf.json` 中的版本号；三个版本源
-   必须一致，Cargo 锁文件中的根包版本也必须同步。
-2. 提交发布前先执行完整检查：
+1. Update the version in `package.json`, `src-tauri/Cargo.toml`,
+   `src-tauri/Cargo.lock`, and `src-tauri/tauri.conf.json`. All version sources,
+   including the root package entry in the Cargo lockfile, must match.
+2. Run the complete pre-release checks:
 
    ```bash
    pnpm run check
    pnpm run build
    ```
 
-3. 根据目标选择一个发布命令：
+3. Choose a release target:
 
    ```bash
-   # macOS 通用架构（Apple Silicon + Intel）
+   # Universal macOS build (Apple Silicon + Intel)
    pnpm run build:mac
 
-   # Windows x64（在 macOS/Linux 上使用 cargo-xwin）
+   # Windows x64 via cargo-xwin on macOS/Linux
    pnpm run build:win
 
-   # 依次构建 macOS 通用架构和 Windows x64
+   # Build universal macOS, then Windows x64
    pnpm run build:release
    ```
 
-   如只需单一 macOS 架构，可覆盖默认目标：
+   To build a single macOS architecture, override the default target:
 
    ```bash
    AIMONITOR_MAC_TARGET=aarch64-apple-darwin pnpm run build:mac
    AIMONITOR_MAC_TARGET=x86_64-apple-darwin pnpm run build:mac
    ```
 
-4. 发布成功后检查 `publish/`。脚本会在所有目标均成功后清理旧产物，并生成：
+4. Inspect `publish/` after a successful release. The script removes old
+   artifacts only after all requested targets succeed and generates:
 
-   - `AIMonitorDesktop-macOS-<架构>-v<版本>.dmg`
-   - `AIMonitorDesktop-Windows-x64-v<版本>-setup.exe`
+   - `AIMonitorDesktop-macOS-<architecture>-v<version>.dmg`
+   - `AIMonitorDesktop-Windows-x64-v<version>-setup.exe`
    - `AIMonitorDesktop-SHA256SUMS.txt`
 
-macOS 自动流程为：Tauri 构建并签名 → 校验签名 → 提交 Apple 公证并等待
-`Accepted` → staple 公证票据 → Gatekeeper 校验 → 复制到 `publish/`。任一步骤
-失败都会终止发布，不会把未公证的 DMG 当作正式产物。
+The automated macOS flow is: build and sign with Tauri → verify the signature →
+submit to Apple and wait for `Accepted` → staple the notarization ticket → run
+the Gatekeeper check → copy the result into `publish/`. Any failure stops the
+release, so an unnotarized DMG is never presented as a release artifact.
 
-Windows 安装器目前使用 `--no-sign` 构建，因此没有 Authenticode 签名；这与
-macOS 的 Developer ID 签名、公证是两套独立机制。
+The Windows installer currently uses `--no-sign` and therefore has no
+Authenticode signature. This is independent of macOS Developer ID signing and
+notarization.
 
-### 发布后验证
+### Post-release verification
 
-将下面的 DMG 文件名替换为本次实际产物：
+Replace the placeholder with the actual DMG filename:
 
 ```bash
-xcrun stapler validate "publish/AIMonitorDesktop-macOS-<架构>-v<版本>.dmg"
+xcrun stapler validate "publish/AIMonitorDesktop-macOS-<architecture>-v<version>.dmg"
 spctl --assess --verbose=2 --type open \
   --context context:primary-signature \
-  "publish/AIMonitorDesktop-macOS-<架构>-v<版本>.dmg"
+  "publish/AIMonitorDesktop-macOS-<architecture>-v<version>.dmg"
 shasum -a 256 -c publish/AIMonitorDesktop-SHA256SUMS.txt
 ```
 
-`stapler validate` 应成功；`spctl` 输出应包含 `accepted` 和
-`source=Notarized Developer ID`。最后建议把 DMG 下载到另一台 Mac，按真实用户
-路径完成一次安装和首次启动测试。
+`stapler validate` should succeed. The `spctl` output should contain `accepted`
+and `source=Notarized Developer ID`. As a final check, download the DMG onto
+another Mac and test installation and first launch through the normal user flow.
 
-### 更换电脑或轮换密钥
+### Moving to a new machine or rotating keys
 
-新电脑需要同时迁移两类凭据：Developer ID 证书及其私钥，以及 App Store
-Connect `.p8` 私钥。导入签名证书后，在新电脑重新执行
-`notarytool store-credentials`，不要复制钥匙串 profile 文件。确认新配置可用后，
-再到 App Store Connect 撤销不再使用的旧 API Key。
+A new machine needs both the Developer ID certificate with its private key and
+the App Store Connect `.p8` private key. After importing the signing identity,
+run `notarytool store-credentials` again on the new machine; do not copy a
+keychain profile file. Once the new configuration is verified, revoke any old
+API key that is no longer needed in App Store Connect.
 
-### 常见问题
+### Troubleshooting
 
-- 找不到签名身份：确认钥匙串内同时存在证书和对应私钥，再运行
-  `security find-identity -v -p codesigning`。
-- 找不到 `AIMonitorNotary`：重新执行 `notarytool store-credentials`，或设置正确的
-  `AIMONITOR_NOTARY_PROFILE`。
-- 公证返回 `Invalid`：从构建输出取得 Submission ID，然后执行
-  `xcrun notarytool log <SUBMISSION_ID> --keychain-profile AIMonitorNotary` 查看原因。
-- Windows 构建提示缺少命令：检查 `cargo-xwin`、`makensis`、`llvm-rc` 是否都在
-  `PATH` 中。
-- DMG 能签名但仍被 Gatekeeper 拦截：不要绕过安全检查发布；确认
-  `stapler validate` 成功且 `spctl` 显示 `Notarized Developer ID` 后重新分发。
+- Signing identity not found: make sure the certificate and matching private key
+  are both in the keychain, then run
+  `security find-identity -v -p codesigning`.
+- `AIMonitorNotary` not found: run `notarytool store-credentials` again or set
+  the correct `AIMONITOR_NOTARY_PROFILE`.
+- Notarization returns `Invalid`: get the Submission ID from the build output,
+  then run
+  `xcrun notarytool log <SUBMISSION_ID> --keychain-profile AIMonitorNotary`.
+- Windows build reports a missing command: verify that `cargo-xwin`,
+  `makensis`, and `llvm-rc` are all on `PATH`.
+- The DMG is signed but Gatekeeper still blocks it: do not bypass the security
+  check for a release. Verify that `stapler validate` succeeds and `spctl`
+  reports `Notarized Developer ID`, then redistribute the corrected artifact.
