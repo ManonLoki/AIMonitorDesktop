@@ -10,3 +10,5 @@ pub(crate) const UDP_DISCOVERY_PORT: u16 = 8_080;
 pub(crate) const MAX_BODY_BYTES: usize = 8 * 1024 * 1024;
 // 对外暴露的 API 版本号，写入 /api/device 与 UDP 探测响应，供客户端做兼容判断。
 pub(crate) const API_VERSION: u8 = 3;
+// 宫格行数/列数允许的取值范围；用户输入校验和偏好文件归一化共用同一份定义。
+pub(crate) const GRID_AXIS_RANGE: std::ops::RangeInclusive<u8> = 1..=5;

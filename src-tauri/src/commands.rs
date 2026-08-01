@@ -19,7 +19,7 @@ pub(crate) fn get_monitor_state(runtime: State<'_, SharedRuntime>) -> MonitorSta
 }
 
 fn validate_grid_axis(value: Option<u8>) -> Result<(), String> {
-    if value.is_some_and(|value| !(1..=5).contains(&value)) {
+    if value.is_some_and(|value| !crate::constants::GRID_AXIS_RANGE.contains(&value)) {
         return Err("行数和列数必须在 1–5 之间".into());
     }
     Ok(())
@@ -73,18 +73,16 @@ pub(crate) fn set_grid_columns(
 }
 
 #[tauri::command]
-pub(crate) fn get_pet_view_state(
-    runtime: State<'_, SharedRuntime>,
-) -> Result<PetViewState, String> {
+pub(crate) fn get_pet_view_state(runtime: State<'_, SharedRuntime>) -> PetViewState {
     // 同时持有两份读取所需的锁，避免组装出不同时刻的混合快照。
     let state = runtime.state.read();
     let windows = runtime.windows.lock();
-    Ok(build_pet_view_state(&state, &windows.pet_window))
+    build_pet_view_state(&state, &windows.pet_window)
 }
 
 fn patch_pet_focus(
     runtime: &SharedRuntime,
-    select: impl FnOnce(&MonitorState, &crate::model::PetWindowPreferences) -> Option<u8>,
+    select: impl FnOnce(&MonitorState, &crate::preferences::PetWindowPreferences) -> Option<u8>,
 ) -> Result<bool, String> {
     let changed = {
         let state = runtime.state.read();
@@ -290,10 +288,9 @@ pub(crate) fn set_pet_locked(
     runtime: State<'_, SharedRuntime>,
     tray_menu: State<'_, TrayMenu>,
     locked: bool,
-) -> Result<(), String> {
-    window_manager::set_pet_locked(&runtime, locked)?;
+) {
+    window_manager::set_pet_locked(&runtime, locked);
     tray_menu.set_pet_locked_checked(locked);
-    Ok(())
 }
 
 #[tauri::command]

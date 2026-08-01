@@ -203,9 +203,7 @@ pub fn setup(
             PET_LOCKED_MENU_ID => {
                 let previous = runtime_for_events.window_snapshot().pet_window.locked;
                 let locked = pet_locked_for_events.is_checked().unwrap_or(previous);
-                if window_manager::set_pet_locked(&runtime_for_events, locked).is_err() {
-                    let _ = pet_locked_for_events.set_checked(previous);
-                }
+                window_manager::set_pet_locked(&runtime_for_events, locked);
             }
             QUIT_MENU_ID => {
                 for label in ["main", "pet"] {

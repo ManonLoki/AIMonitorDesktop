@@ -3,7 +3,8 @@
 use crate::constants::FIRST_HTTP_PORT;
 use crate::device_info::{default_device_name, local_ipv4};
 use crate::heartbeat::ClientLeases;
-use crate::model::{MonitorState, MonitorTile, Preferences, WindowPreferences, WindowState};
+use crate::model::{MonitorState, MonitorTile, WindowState};
+use crate::preferences::{Preferences, WindowPreferences};
 use parking_lot::{Mutex, RwLock};
 use std::{
     fs,
@@ -53,8 +54,9 @@ impl Runtime {
         }
         Arc::new(Self {
             state: RwLock::new(MonitorState {
-                rows: preferences.rows.clamp(1, 5), // 防御性 clamp：即便偏好文件被手工改坏也不会越界
-                columns: preferences.columns.clamp(1, 5),
+                // load_preferences 已经用 normalize_preferences 把 rows/columns 收敛到 1..=5，这里直接信任它。
+                rows: preferences.rows,
+                columns: preferences.columns,
                 image_display_mode: preferences.image_display_mode,
                 auto_start,
                 language: preferences.language,
@@ -181,27 +183,13 @@ impl Runtime {
     }
 }
 
-fn default_preferences() -> Preferences {
-    Preferences {
-        rows: 2,                                                       // 默认 2 行
-        columns: 2,                                                    // 默认 2 列
-        image_display_mode: crate::model::ImageDisplayMode::default(), // 默认等比缩放
-        auto_start: false,                                             // 默认不开机自启
-        language: crate::model::LanguagePreference::default(),         // 默认跟随系统语言
-        windows: WindowPreferences::default(),
-        window: None,
-        device_id: Uuid::new_v4().to_string(), // 首次启动生成一个新的随机设备 ID
-        device_name: default_device_name(),    // 首次启动用主机名作为默认设备名
-    }
-}
-
 // serde_with 会把类型损坏的标量恢复为该类型的 Default；这里再把那些“类型默认值”
 // 不等于产品默认值的字段归一化，避免 0 行宫格或空设备身份进入运行时。
 fn normalize_preferences(mut preferences: Preferences) -> Preferences {
-    if !(1..=5).contains(&preferences.rows) {
+    if !crate::constants::GRID_AXIS_RANGE.contains(&preferences.rows) {
         preferences.rows = 2;
     }
-    if !(1..=5).contains(&preferences.columns) {
+    if !crate::constants::GRID_AXIS_RANGE.contains(&preferences.columns) {
         preferences.columns = 2;
     }
     if preferences.device_id.trim().is_empty() {
@@ -219,7 +207,7 @@ pub(crate) fn load_preferences(path: &Path) -> Preferences {
     let preferences = fs::read(path)
         .ok() // 文件不存在/读取失败则转为 None
         .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-        .unwrap_or_else(default_preferences);
+        .unwrap_or_default();
     normalize_preferences(preferences)
 }
 

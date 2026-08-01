@@ -39,6 +39,7 @@ mod mdns;
 mod model;
 mod pet_geometry;
 mod pet_paging;
+mod preferences;
 mod runtime;
 mod tray;
 mod window_geometry;

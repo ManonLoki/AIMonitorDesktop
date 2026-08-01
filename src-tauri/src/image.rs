@@ -4,14 +4,18 @@
 use std::path::Path;
 use tokio::io::AsyncReadExt;
 
-// 通过 infer 的文件类型探测返回 (扩展名, MIME类型)；不依赖文件名/扩展名，
-// 并在 infer 支持的众多格式中显式收窄到 API 允许的 JPEG/PNG/GIF。
+// 通过 infer 的文件类型探测返回 (扩展名, MIME类型)；不依赖文件名/扩展名。
+// 直接调用 infer::image 里 JPEG/PNG/GIF 各自的探测函数，而不是 infer::get()
+// （后者会遍历 infer 内置的全部格式表），因为 API 只认这三种格式。
 pub(crate) fn detect_image(bytes: &[u8]) -> Option<(&'static str, &'static str)> {
-    match infer::get(bytes)?.mime_type() {
-        "image/jpeg" => Some(("jpg", "image/jpeg")),
-        "image/png" => Some(("png", "image/png")),
-        "image/gif" => Some(("gif", "image/gif")),
-        _ => None,
+    if infer::image::is_jpeg(bytes) {
+        Some(("jpg", "image/jpeg"))
+    } else if infer::image::is_png(bytes) {
+        Some(("png", "image/png"))
+    } else if infer::image::is_gif(bytes) {
+        Some(("gif", "image/gif"))
+    } else {
+        None
     }
 }
 

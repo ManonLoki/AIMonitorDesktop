@@ -156,17 +156,11 @@ fn keep_pet_aspect_for_resolved_monitor(
         let _ = window.set_size(expected);
     }
     // 尺寸真的变化了才落盘 + 广播，避免每次 resize tick 都写 preferences.json。
-    let changed = {
-        let mut windows = runtime.windows.lock();
-        if windows.pet_window.pet_size != pet_size {
-            windows.pet_window.pet_size = pet_size;
-            true
-        } else {
-            false
-        }
-    };
-    if changed {
-        // 先释放窗口状态锁再广播，避免事件处理方同步读取同一把锁时形成重入死锁。
+    let mut windows = runtime.windows.lock();
+    if windows.pet_window.pet_size != pet_size {
+        windows.pet_window.pet_size = pet_size;
+        // 广播前先释放窗口状态锁，避免事件处理方同步读取同一把锁时形成重入死锁。
+        drop(windows);
         runtime.window_changed();
     }
 }

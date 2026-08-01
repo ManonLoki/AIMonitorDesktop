@@ -1,8 +1,7 @@
 //! 桌宠分页的纯计算与前端专用视图快照。
 
-use crate::model::{
-    LanguagePreference, MonitorState, MonitorTile, PetLayout, PetWindowPreferences,
-};
+use crate::model::{LanguagePreference, MonitorState, MonitorTile, PetLayout};
+use crate::preferences::PetWindowPreferences;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]

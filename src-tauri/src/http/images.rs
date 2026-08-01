@@ -90,8 +90,8 @@ pub(crate) async fn upload_image(
     State(runtime): State<SharedRuntime>,
     request: Request,
 ) -> Response {
-    let mut bytes = match extract_upload_bytes(request).await {
-        Ok(bytes) => bytes.to_vec(),
+    let bytes = match extract_upload_bytes(request).await {
+        Ok(bytes) => bytes,
         Err(response) => return response,
     };
     let Some((extension, _)) = detect_image(&bytes) else {
@@ -100,14 +100,17 @@ pub(crate) async fn upload_image(
             "image must be a valid JPG, PNG, or GIF file", // 魔数校验未通过，不是受支持的图片格式
         );
     };
-    if extension == "gif" {
-        make_gif_loop_forever(&mut bytes); // GIF 落盘前先修正为无限循环播放
-    }
+    // 只有 GIF 需要就地改写循环标记，才值得为它单独拷贝一份可写缓冲区；
+    // JPG/PNG 直接落盘原始 Bytes，避免每次上传都多一次整份拷贝。
     let filename = format!("{}.{}", Uuid::new_v4(), extension); // 随机 UUID 文件名，避免信任客户端文件名
-    if tokio::fs::write(runtime.image_dir.join(&filename), bytes)
-        .await
-        .is_err()
-    {
+    let write_result = if extension == "gif" {
+        let mut bytes = bytes.to_vec();
+        make_gif_loop_forever(&mut bytes); // GIF 落盘前先修正为无限循环播放
+        tokio::fs::write(runtime.image_dir.join(&filename), bytes).await
+    } else {
+        tokio::fs::write(runtime.image_dir.join(&filename), bytes).await
+    };
+    if write_result.is_err() {
         return error_json(
             StatusCode::BAD_REQUEST,
             "image must be a valid JPG, PNG, or GIF file", // 写盘失败（磁盘满/权限问题等）复用同一错误文案

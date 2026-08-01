@@ -1,10 +1,11 @@
 //! 主窗口与桌宠窗口的几何持久化：保存、跨 DPI 恢复和工作区收敛。
 //! 桌宠尺寸约束/跨显示器收敛的数学在 pet_geometry.rs（职责分开，避免单文件超过 400 行）。
 
-use crate::model::{MainWindowPreferences, PetLayout, WindowGeometry};
+use crate::model::{PetLayout, WindowGeometry};
 use crate::pet_geometry::{
     apply_pet_constraints, pet_size_range_for_monitor, physical_pet_window_size,
 };
+use crate::preferences::MainWindowPreferences;
 use crate::runtime::SharedRuntime;
 use tauri::{PhysicalPosition, PhysicalSize, WebviewWindow};
 
