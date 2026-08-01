@@ -9,8 +9,8 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
     sync::{
-        Arc, Mutex, RwLock,
         atomic::{AtomicU64, Ordering},
+        Arc, Mutex, RwLock,
     },
     time::Duration,
 };
@@ -26,6 +26,7 @@ pub(crate) struct Runtime {
     pub(crate) image_dir: PathBuf, // 图片文件落盘目录（应用缓存目录下）
     preferences_path: PathBuf,     // preferences.json 的完整路径，只在本文件内使用
     pub(crate) windows: Mutex<WindowPreferences>, // 主窗口与桌宠窗口的独立持久化状态
+    preferences_save_lock: Mutex<()>, // 串行化“快照 + 写盘”，防止旧快照后写覆盖新值
     save_generation: AtomicU64,    // 移动/缩放写盘防抖代次
     pub(crate) client_leases: Mutex<ClientLeases>, // 控制端心跳租约，跨 HTTP 请求共享
     pub(crate) app: AppHandle,     // 用于向前端发送事件、访问自启动插件
@@ -68,6 +69,7 @@ impl Runtime {
             image_dir,
             preferences_path,
             windows: Mutex::new(preferences.windows),
+            preferences_save_lock: Mutex::new(()),
             save_generation: AtomicU64::new(0),
             client_leases: Mutex::new(ClientLeases::default()),
             app,
@@ -81,21 +83,26 @@ impl Runtime {
 
     // 把当前状态中可持久化的字段写入 preferences.json；调用方在每次状态变更后触发。
     pub(crate) fn save_preferences(&self) {
-        let state = self.snapshot(); // 先拿到状态快照，避免在构造 Preferences 时持锁
-        let preferences = Preferences {
-            rows: state.rows,
-            columns: state.columns,
-            image_display_mode: state.image_display_mode,
-            auto_start: state.auto_start,
-            language: state.language,
-            windows: self
-                .windows
-                .lock()
-                .expect("window state lock poisoned")
-                .clone(),
-            window: None,
-            device_id: state.device_id,
-            device_name: state.device_name,
+        // 所有调用方都在进入此函数前释放 state/windows；此处统一按
+        // save -> state -> windows 取锁，同时把快照和 persist 纳入一个串行临界区。
+        let _save_guard = self
+            .preferences_save_lock
+            .lock()
+            .expect("preferences save lock poisoned");
+        let preferences = {
+            let state = self.state.read().expect("state lock poisoned");
+            let windows = self.windows.lock().expect("window state lock poisoned");
+            Preferences {
+                rows: state.rows,
+                columns: state.columns,
+                image_display_mode: state.image_display_mode.clone(),
+                auto_start: state.auto_start,
+                language: state.language,
+                windows: windows.clone(),
+                window: None,
+                device_id: state.device_id.clone(),
+                device_name: state.device_name.clone(),
+            }
         };
         if let Some(parent) = self.preferences_path.parent() {
             let _ = fs::create_dir_all(parent); // 确保配置目录存在（首次启动时可能还未创建）

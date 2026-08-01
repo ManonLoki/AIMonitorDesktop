@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { AnimatedContent } from "./reactbits/AnimatedContent";
 import { SpotlightCard } from "./reactbits/SpotlightCard";
 import { Icon } from "./Icon";
 import type { MonitorState } from "../types/monitor";
 import type { TranslationFunction } from "../i18n";
+import { call } from "../lib/tauri";
 
 // 只读的一行"标签 - 值"展示，value 同时作为 title 属性，便于过长内容悬浮查看完整值。
 function SettingRow({ label, value }: { label: string; value: string }) {
@@ -64,27 +64,18 @@ function ChoiceRow({
 }
 
 // 设置页：展示版本、开机自启、网络服务信息，以及宫格行列/图片显示模式的调整入口。
-// 所有修改都通过 invoke 调用 Rust 侧 Tauri 命令，命令执行成功后立即调用 onRefresh
-// 重新拉取一次完整状态，而不是在前端本地乐观更新——保证展示的始终是后端落盘后的真实值。
+// 所有修改都只向 Rust 表达意图；Rust 落盘并广播事件后，订阅 hook 会拉取权威快照。
 export function SettingsPanel({
   state,
-  onRefresh,
   t,
 }: {
   state: MonitorState;
-  onRefresh: () => Promise<void>;
   t: TranslationFunction;
 }) {
   // 设备名称使用本地受控输入，允许用户编辑到未保存状态，
   // 仅在后端状态变化时（例如首次加载）用后端值覆盖本地草稿。
   const [deviceName, setDeviceName] = useState(state.deviceName); // 本地输入框草稿值
   useEffect(() => setDeviceName(state.deviceName), [state.deviceName]); // 后端设备名变化时同步覆盖草稿
-
-  // 统一的“调命令 + 刷新状态”封装，避免每个设置项都重复写这两步
-  const call = async (command: string, args: Record<string, unknown>) => {
-    await invoke(command, args); // 调用 Rust 侧 Tauri 命令并等待完成
-    await onRefresh(); // 命令成功后立即拉取最新状态
-  };
 
   const address = state.localIp || t("notConnectedLan"); // 局域网 IP，下方多处 URL 展示都会用到
 
@@ -111,7 +102,9 @@ export function SettingsPanel({
             <select
               aria-label={t("language")}
               value={state.language}
-              onChange={(event) => void call("set_language", { language: event.currentTarget.value })}
+              onChange={(event) => void call("set_language", {
+                language: event.currentTarget.value as MonitorState["language"],
+              })}
             >
               <option value="system">{t("languageSystem")}</option>
               <option value="zh-CN">{t("languageChinese")}</option>
@@ -150,7 +143,7 @@ export function SettingsPanel({
               <span>{t("deviceName")}</span>
               <input
                 value={deviceName}
-                maxLength={40} // 与后端 set_device_name 中的截断长度保持一致
+                maxLength={40} // 输入体验的即时限制；最终清洗和校验仍以 Rust 为准
                 onChange={(event) => setDeviceName(event.target.value)} // 仅更新本地草稿，不立即提交
               />
               <small>{t("deviceNameHint")}</small>
@@ -182,13 +175,13 @@ export function SettingsPanel({
               label={t("rows")}
               hint={t("choicesOneToFive")}
               value={state.rows}
-              onChange={(rows) => void call("set_grid", { rows, columns: state.columns })} // 只改行数，列数沿用当前值
+              onChange={(rows) => void call("set_grid_rows", { rows })}
             />
             <ChoiceRow
               label={t("columns")}
               hint={t("choicesOneToFive")}
               value={state.columns}
-              onChange={(columns) => void call("set_grid", { rows: state.rows, columns })} // 只改列数，行数沿用当前值
+              onChange={(columns) => void call("set_grid_columns", { columns })}
             />
             <div className="divider" />
             <div className="display-mode">

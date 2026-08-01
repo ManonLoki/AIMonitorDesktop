@@ -38,16 +38,18 @@ mod image;
 mod mdns;
 mod model;
 mod pet_geometry;
+mod pet_paging;
 mod runtime;
 mod tray;
 mod window_geometry;
 mod window_manager;
 
 use commands::{
-    get_monitor_state, get_window_state, hide_current_window, hide_pet_settings, resize_pet_by,
-    set_auto_start, set_device_name, set_grid, set_image_display_mode, set_language,
-    set_pet_always_on_top, set_pet_focused_slot, set_pet_layout, set_pet_locked, set_pet_size,
-    show_pet_settings, start_pet_drag, switch_app_mode, sync_language,
+    focus_first_populated_pet_page, get_monitor_state, get_pet_view_state, get_window_state,
+    hide_current_window, hide_pet_settings, resize_pet_by, resize_pet_step, set_auto_start,
+    set_device_name, set_grid, set_grid_columns, set_grid_rows, set_image_display_mode,
+    set_language, set_pet_always_on_top, set_pet_focused_slot, set_pet_layout, set_pet_locked,
+    set_pet_size, show_pet_settings, start_pet_drag, switch_app_mode, sync_language, turn_pet_page,
 };
 use runtime::{load_preferences, Runtime};
 use std::fs;
@@ -78,9 +80,11 @@ pub fn run() {
             let cache_dir = app.path().app_cache_dir()?; // 应用缓存目录，存放上传的图片
             let preferences_path = config_dir.join("preferences.json");
             let image_dir = cache_dir.join("monitor_images");
-            fs::create_dir_all(&image_dir)?; // 确保图片目录存在，后续上传直接写入
-            let preferences = load_preferences(&preferences_path); // 加载历史偏好（或生成默认值）
-                                                                   // 自启动的真实开关状态以操作系统为准，读取失败时才回退到上次保存的偏好值。
+            // 确保图片目录存在，后续上传直接写入。
+            fs::create_dir_all(&image_dir)?;
+            // 加载历史偏好（或生成默认值）。
+            let preferences = load_preferences(&preferences_path);
+            // 自启动的真实开关状态以操作系统为准，读取失败时才回退到上次保存的偏好值。
             let auto_start = app
                 .autolaunch()
                 .is_enabled()
@@ -93,8 +97,10 @@ pub fn run() {
                 auto_start,
                 app.package_info().version.to_string(), // 从 Tauri 打包信息读取版本号
             );
-            runtime.save_preferences(); // 首次落盘，规范化/补全可能缺失的字段
-            let tray_menu = tray::setup(app, runtime.clone(), auto_start)?; // 创建托盘菜单并绑定共享状态
+            // 首次落盘，规范化/补全可能缺失的字段。
+            runtime.save_preferences();
+            // 创建托盘菜单并绑定共享状态。
+            let tray_menu = tray::setup(app, runtime.clone(), auto_start)?;
             // 三个窗口共用同一套事件回调：这里本身不知道、也不关心哪个 label 是桌宠——
             // handle_window_resized/handle_window_moved 内部才按 label 判断要不要跑桌宠专属逻辑，
             // 保证以后新增第四个窗口时这段循环不用改。
@@ -107,7 +113,8 @@ pub fn run() {
                 window.on_window_event(move |event| {
                     if let WindowEvent::Resized(size) = event {
                         handle_window_resized(&window_for_events, *size, &runtime_for_events);
-                        save_window_state(&window_for_events, &runtime_for_events, false); // false=防抖写盘，resize 是高频事件
+                        // false=防抖写盘，resize 是高频事件。
+                        save_window_state(&window_for_events, &runtime_for_events, false);
                     } else if matches!(event, WindowEvent::Moved(_)) {
                         handle_window_moved(&window_for_events, &runtime_for_events);
                         save_window_state(&window_for_events, &runtime_for_events, false);
@@ -125,14 +132,17 @@ pub fn run() {
             mdns::start_mdns(&runtime); // 注册 mDNS 服务
             runtime.state.write().expect("state lock poisoned").port = port; // 用真实端口覆盖占位值（start_http_server 内部其实已经写过一次，这里是双保险）
             app.manage(tray_menu); // 供设置页命令同步托盘中的“开机自启”勾选状态
-            app.manage(runtime.clone()); // 交给 Tauri 管理，之后各 #[tauri::command] 才能通过 State 取到它
+            app.manage(runtime.clone()); // 供托盘单实例回调和 Tauri command 取用
             window_manager::show_active_window(app.handle(), &runtime)
                 .map_err(std::io::Error::other)?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             get_monitor_state,
+            get_pet_view_state,
             set_grid,
+            set_grid_rows,
+            set_grid_columns,
             set_image_display_mode,
             set_device_name,
             set_auto_start,
@@ -149,6 +159,9 @@ pub fn run() {
             set_pet_locked,
             set_pet_size,
             resize_pet_by,
+            resize_pet_step,
+            turn_pet_page,
+            focus_first_populated_pet_page,
             start_pet_drag
         ]) // 注册所有可从前端 invoke 调用的命令
         .run(tauri::generate_context!())

@@ -9,18 +9,6 @@ use tauri::{LogicalSize, Monitor, PhysicalSize, WebviewWindow};
 
 const PET_CELL_MIN: u16 = 32;
 
-// 返回布局的（行数, 列数）；pet_size 始终表示一个格子的正方形边长。
-pub(crate) fn pet_layout_dimensions(layout: PetLayout) -> (u16, u16) {
-    match layout {
-        PetLayout::Single => (1, 1),
-        PetLayout::Row => (1, 2),
-        PetLayout::Column => (2, 1),
-        PetLayout::Row3 => (1, 3),
-        PetLayout::Column3 => (3, 1),
-        PetLayout::Grid => (2, 2),
-    }
-}
-
 // 按“当前显示器工作区的最短边”换算出这块屏幕上桌宠允许的尺寸区间。
 pub(crate) fn pet_size_range_for_monitor(monitor: &Monitor, layout: PetLayout) -> (u16, u16) {
     let area = monitor.work_area();
@@ -36,7 +24,7 @@ pub(crate) fn pet_size_range_for_monitor(monitor: &Monitor, layout: PetLayout) -
 // 单格最大边长 = 显示器逻辑最短边 / 4 / 布局最长轴格子数。
 // 因此无论横排、竖排还是 2×2，整个窗口的长边上限都等于屏幕最短边的 1/4。
 fn maximum_pet_size(shortest_physical: u32, scale_factor: f64, layout: PetLayout) -> u16 {
-    let (rows, columns) = pet_layout_dimensions(layout);
+    let (rows, columns) = layout.dimensions();
     let axis_count = rows.max(columns);
     (f64::from(shortest_physical) / scale_factor / 4.0 / f64::from(axis_count))
         .floor()
@@ -81,7 +69,7 @@ pub(crate) fn pet_size_range(window: &WebviewWindow, layout: PetLayout) -> (u16,
 
 // 窗口尺寸只做乘法：单格边长 × 列数、单格边长 × 行数。
 pub(crate) fn logical_pet_window_size(layout: PetLayout, pet_size: u16) -> LogicalSize<f64> {
-    let (rows, columns) = pet_layout_dimensions(layout);
+    let (rows, columns) = layout.dimensions();
     let cell = f64::from(pet_size);
     LogicalSize::new(cell * f64::from(columns), cell * f64::from(rows))
 }
@@ -153,7 +141,7 @@ fn keep_pet_aspect_for_resolved_monitor(
         )
     });
     let scale = window.scale_factor().unwrap_or(1.0);
-    let (rows, columns) = pet_layout_dimensions(layout);
+    let (rows, columns) = layout.dimensions();
     let width_candidate = f64::from(size.width) / f64::from(columns);
     let height_candidate = f64::from(size.height) / f64::from(rows);
     let requested_cell_size = previous.map_or(width_candidate, |previous| {

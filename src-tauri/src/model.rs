@@ -95,6 +95,24 @@ pub(crate) enum PetLayout {
     Grid,
 }
 
+impl PetLayout {
+    pub(crate) const fn dimensions(self) -> (u16, u16) {
+        match self {
+            Self::Single => (1, 1),
+            Self::Row => (1, 2),
+            Self::Column => (2, 1),
+            Self::Row3 => (1, 3),
+            Self::Column3 => (3, 1),
+            Self::Grid => (2, 2),
+        }
+    }
+
+    pub(crate) const fn capacity(self) -> usize {
+        let (rows, columns) = self.dimensions();
+        rows as usize * columns as usize
+    }
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct MainWindowPreferences {

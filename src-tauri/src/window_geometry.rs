@@ -3,8 +3,7 @@
 
 use crate::model::{MainWindowPreferences, PetLayout, WindowGeometry};
 use crate::pet_geometry::{
-    apply_pet_constraints, pet_layout_dimensions, pet_size_range_for_monitor,
-    physical_pet_window_size,
+    apply_pet_constraints, pet_size_range_for_monitor, physical_pet_window_size,
 };
 use crate::runtime::SharedRuntime;
 use tauri::{PhysicalPosition, PhysicalSize, WebviewWindow};
@@ -147,7 +146,7 @@ pub(crate) fn restore_pet_window(
             let (min, max) = pet_size_range_for_monitor(monitor, layout);
             let scale = monitor.scale_factor();
             // 从窗口实际宽度反推单格边长，可自然迁移旧版“整体画布尺寸”的持久化几何。
-            let (_, columns) = pet_layout_dimensions(layout);
+            let (_, columns) = layout.dimensions();
             let cell_size = f64::from(saved_size.width) / f64::from(columns);
             let pet_size = (cell_size / scale).round() as u16;
             let size = physical_pet_window_size(layout, pet_size.clamp(min, max), scale);

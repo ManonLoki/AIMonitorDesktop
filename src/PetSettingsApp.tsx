@@ -11,21 +11,6 @@ export function PetSettingsApp() {
   const { t } = useI18n(monitor.language);
   const preferences = state.petWindow;
 
-  // 每次都是“关掉设置窗口”+“做另一件事”两个独立命令，并发发出即可，不必等前一个返回。
-  const switchToMain = () => {
-    void Promise.all([
-      call("hide_pet_settings"),
-      call("switch_app_mode", { mode: "main" }),
-    ]);
-  };
-
-  const hidePet = () => {
-    void Promise.all([
-      call("hide_pet_settings"),
-      call("hide_current_window"),
-    ]);
-  };
-
   return (
     <main className="pet-settings-shell">
       <header>
@@ -42,6 +27,7 @@ export function PetSettingsApp() {
           ×
         </button>
       </header>
+      {/* 原生窗口的隐藏顺序与失败处理统一由 Rust 完成，前端只表达用户意图。 */}
       <PetContextMenu
         standalone
         preferences={preferences}
@@ -51,8 +37,8 @@ export function PetSettingsApp() {
         onSize={(size) => void call("set_pet_size", { size })}
         onAlwaysOnTop={(enabled) => void call("set_pet_always_on_top", { enabled })}
         onLocked={(locked) => void call("set_pet_locked", { locked })}
-        onMain={switchToMain}
-        onHide={hidePet}
+        onMain={() => void call("switch_app_mode", { mode: "main" })}
+        onHide={() => void call("hide_current_window")}
         t={t}
       />
     </main>

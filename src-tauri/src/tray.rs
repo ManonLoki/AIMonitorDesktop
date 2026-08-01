@@ -8,9 +8,9 @@ use crate::{
 };
 use std::sync::{Arc, Mutex};
 use tauri::{
-    App, AppHandle, Manager,
     menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem},
     tray::TrayIconBuilder,
+    App, AppHandle, Manager,
 };
 
 const SHOW_WINDOW_MENU_ID: &str = "show-window";

@@ -3,13 +3,13 @@
 ## 1. 文档状态
 
 - 状态：已实现，与当前实现同步
-- 版本基线：`2.0.3`
-- 最近核对日期：2026-07-28
+- 版本基线：`2.0.4`
+- 最近核对日期：2026-08-01
 - 适用平台：Windows、macOS
 - 相关基线：`PRODUCT_REQUIREMENTS.md`、`TECH_STACK.md`
 - 实现来源：`src/`、`src-tauri/src/` 与 `src-tauri/tauri.conf.json`
 
-本文记录 2.0.3 桌宠模式的当前产品行为、窗口架构、持久化字段与验收边界。
+本文记录 2.0.4 桌宠模式的当前产品行为、窗口架构、持久化字段与验收边界。
 实现变更如影响本文任一条目，必须在同一提交中更新本文及项目级文档。
 
 ## 2. 目标
@@ -111,12 +111,17 @@ pet-settings -> PetSettingsApp
 
 - `useMonitorState`
 - `useWindowState`
+- `usePetViewState`（`PetApp` 唯一使用的 Rust 复合读模型）
+- `useTauriState`（上述 hook 共用的 invoke/listen 通路）
 - `MonitorState` / `MonitorTile` 类型
-- `WindowState` / `PetWindowPreferences` 类型
+- `WindowState` / `PetWindowPreferences` / `PetViewState` 类型
 - 本机图片 URL 构造规则
 - Tauri `invoke`、`monitor-state-changed` 和 `window-state-changed` 事件通路
 
 不为桌宠引入第二套服务端状态管理，也不通过本机 HTTP 完成前后端状态通信。
+`PetApp` 不自行组合 `MonitorState` 与 `WindowState`；Rust 在同一次
+`get_pet_view_state` 查询中计算布局容量、页码、当前页槽位和图片存在性，避免两份
+异步快照短暂不一致。
 
 ### 5.5 互斥切换流程
 
@@ -205,6 +210,10 @@ pageStart = pageIndex × capacity
 
 当 `rows × columns` 减少导致 `focusedSlot` 越界时，将其收敛到最后一个有效槽位；增加时保持原关注槽位。
 
+上述容量、页数、页起点、焦点收敛与尾页补位规则统一实现在 Rust
+`pet_paging.rs`。前端消费 `PetViewState` 的 `pageIndex`、`pageCount`、
+`pageHasImage` 与固定容量 `slots`，不重复维护公式。
+
 ### 7.3 翻页行为
 
 - 悬停窗口时显示上一页、下一页按钮和紧凑页码。
@@ -217,6 +226,8 @@ pageStart = pageIndex × capacity
 - 完成首次有图定位后，后续槽位更新不再自动翻页。
 - 滚轮需要节流，避免一次滚动跨越多页。
 - 窗口获得键盘焦点后，左右方向键可循环翻页。
+- 鼠标、键盘和按钮只映射为 `previous` / `next` 意图；循环页与持久化
+  `focusedSlot` 由 Rust 的 `turn_pet_page` 完成。
 
 ## 8. 桌宠内容与视觉
 
@@ -407,15 +418,16 @@ petWindow.locked = false
 Rust 侧通过以下命令统一管理窗口模式与桌宠状态：
 
 - `get_window_state`
+- `get_pet_view_state`
 - `switch_app_mode`
 - `hide_current_window`
 - `show_pet_settings` / `hide_pet_settings`
-- `set_pet_layout` / `set_pet_focused_slot`
-- `set_pet_size` / `resize_pet_by`
+- `set_pet_layout` / `turn_pet_page` / `focus_first_populated_pet_page`
+- `set_pet_size` / `resize_pet_step`
 - `set_pet_always_on_top` / `set_pet_locked`
 - `start_pet_drag`
 
-窗口互斥、恢复、失败回滚和偏好落盘应由 Rust 侧执行，避免两个前端窗口分别操作后产生竞态。
+窗口互斥、设置辅窗隐藏、恢复、失败回滚和偏好落盘由 Rust 侧执行，避免两个前端窗口分别操作后产生竞态。旧的 raw-slot / raw-delta 命令只保留为兼容入口，不作为新前端调用边界。
 
 `MonitorState` 仍是监控业务状态。窗口模式偏好可以作为单独的窗口状态返回，避免把纯 UI 几何混入局域网设备状态。
 

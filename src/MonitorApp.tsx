@@ -1,4 +1,3 @@
-import { invoke } from "@tauri-apps/api/core";
 import { useState } from "react";
 import { AnimatedContent } from "./components/reactbits/AnimatedContent";
 import { Icon } from "./components/Icon";
@@ -6,12 +5,13 @@ import { MonitorCanvas } from "./components/MonitorCanvas";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { useMonitorState } from "./hooks/useMonitorState";
 import { useI18n } from "./i18n";
+import { call } from "./lib/tauri";
 
 // 应用根组件：左侧固定导航栏 + 右侧工作区（监控画布 / 设置页二选一）。
 // 全部状态来自 useMonitorState（订阅 Rust 后端），不再引入路由库——
 // 页面切换只是一个本地 UI 状态，没有可分享的 URL 语义。
 export function MonitorApp() {
-  const { state, refresh } = useMonitorState(); // 唯一的数据来源：Rust 后端状态 + 手动刷新方法
+  const { state } = useMonitorState(); // 唯一的数据来源：Rust 后端快照；写命令成功后由事件触发刷新
   const [destination, setDestination] = useState<"monitor" | "settings">("monitor"); // 当前展示的工作区页面
   const [sidebarExpanded, setSidebarExpanded] = useState(false); // 侧边栏是否展开（默认折叠，仅显示图标）
   const { t } = useI18n(state.language);
@@ -61,7 +61,7 @@ export function MonitorApp() {
         </nav>
         <div className="mode-switch">
           <small>{t("displayMode")}</small>
-          <button title={t("switchToPet")} onClick={() => void invoke("switch_app_mode", { mode: "pet" })}>
+          <button title={t("switchToPet")} onClick={() => void call("switch_app_mode", { mode: "pet" })}>
             <Icon name="pet" />
             <span>{t("petMode")}</span>
           </button>
@@ -83,7 +83,7 @@ export function MonitorApp() {
           {destination === "monitor" ? (
             <MonitorCanvas state={state} t={t} /> // 监控画布：渲染宫格
           ) : (
-            <SettingsPanel state={state} onRefresh={refresh} t={t} /> // 设置页：修改配置后调用 refresh 拉取最新状态
+            <SettingsPanel state={state} t={t} />
           )}
         </AnimatedContent>
       </div>

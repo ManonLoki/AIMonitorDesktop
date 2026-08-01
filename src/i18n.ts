@@ -1,5 +1,5 @@
-import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useMemo, useState } from "react";
+import { call } from "./lib/tauri";
 
 export type LanguagePreference = "system" | "zh-CN" | "en";
 export type ResolvedLocale = "zh-CN" | "en";
@@ -72,7 +72,7 @@ export function useI18n(preference: LanguagePreference) {
   useEffect(() => {
     document.documentElement.lang = locale;
     document.title = "AIMonitorDesktop";
-    if ("__TAURI_INTERNALS__" in window) void invoke("sync_language", { locale });
+    if ("__TAURI_INTERNALS__" in window) void call("sync_language", { locale });
   }, [locale]);
 
   const t = useMemo(() => {

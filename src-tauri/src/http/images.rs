@@ -35,10 +35,10 @@ fn extract_multipart(body: &[u8], content_type: &str) -> Option<Vec<u8>> {
     {
         return Some(body.to_vec()); // 非 multipart，直接把整个请求体当作文件内容
     }
+    // 从 Content-Type 头里提取 boundary 参数。
     let boundary = content_type
         .split(';')
-        .find_map(|part| part.trim().strip_prefix("boundary=")) // 从 Content-Type 头里提取 boundary 参数
-        ?
+        .find_map(|part| part.trim().strip_prefix("boundary="))?
         .trim_matches('"'); // 部分客户端会给 boundary 加引号，去掉它
     let marker = format!("--{boundary}").into_bytes(); // multipart 每个分段前的边界标记
     let header_end = body.windows(4).position(|window| window == b"\r\n\r\n")? + 4; // 字段内容从第一个空行之后开始
@@ -65,7 +65,8 @@ pub(crate) async fn upload_image(
         .and_then(|value| value.to_str().ok())
         .unwrap_or("");
     let Some(mut bytes) = extract_multipart(&body, content_type) else {
-        return error_json(StatusCode::BAD_REQUEST, "an image file is required"); // multipart 解析失败，说明没有携带有效文件字段
+        // multipart 解析失败，说明没有携带有效文件字段。
+        return error_json(StatusCode::BAD_REQUEST, "an image file is required");
     };
     let Some((extension, _)) = detect_image(&bytes) else {
         return error_json(
@@ -156,7 +157,8 @@ pub(crate) async fn get_image(
             if mime == "image/gif" {
                 make_gif_loop_forever(&mut bytes);
             }
-            return (StatusCode::OK, [(header::CONTENT_TYPE, mime)], bytes).into_response(); // 直接把图片原始字节写回，Content-Type 用探测到的 MIME
+            // 直接把图片原始字节写回，Content-Type 用探测到的 MIME。
+            return (StatusCode::OK, [(header::CONTENT_TYPE, mime)], bytes).into_response();
         }
     }
     error_json(StatusCode::NOT_FOUND, "image not found") // 文件不存在，或存在但不是受支持的图片格式

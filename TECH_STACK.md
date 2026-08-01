@@ -1,6 +1,6 @@
 # AIMonitorDesktop 技术选型
 
-当前技术基线：`2.0.3`（多原生窗口与 Rust 统一窗口状态架构）。
+当前技术基线：`2.0.4`（多原生窗口与 Rust 统一窗口状态架构）。
 
 本文件用于固化项目基础技术栈。新增基础设施前，应优先复用下列方案，避免出现职责重叠的库。
 
@@ -17,7 +17,9 @@
 页面内没有独立的服务端状态管理、路由或客户端全局状态库。`main.tsx` 根据原生
 窗口 URL 选择 `MonitorApp`、`PetApp` 或 `PetSettingsApp` 三个组合根；它们全部读取
 Rust 侧的单一 `Runtime`（见 `src-tauri/src/runtime.rs`）。监控状态通过
-`useMonitorState` 拉取与订阅，窗口状态通过 `useWindowState` 拉取与订阅。此前预留的
+`useMonitorState` 拉取与订阅，窗口状态通过 `useWindowState` 拉取与订阅；桌宠通过
+`usePetViewState` 一次读取 Rust 组合好的分页视图，避免在前端拼接两份异步快照。三个
+hook 复用 `useTauriState` 的 invoke/listen 通路。此前预留的
 Mantine、TanStack Router/Query、Axios、Jotai 均未被实际使用，已从依赖中移除；如
 未来需要更复杂的路由、服务端状态或表单能力，再按需引入并回填这张表。
 
@@ -36,11 +38,14 @@ src/
 │   ├── SettingsPanel.tsx # 设置页
 │   └── reactbits/        # React Bits 动效组件（AnimatedContent、SpotlightCard）
 ├── hooks/
+│   ├── useTauriState.ts   # Tauri 读模型通用拉取/事件订阅
 │   ├── useMonitorState.ts # 订阅监控状态
-│   └── useWindowState.ts  # 订阅模式、桌宠偏好与动态尺寸边界
+│   ├── useWindowState.ts  # 订阅模式、桌宠偏好与动态尺寸边界
+│   └── usePetViewState.ts # 订阅 Rust 组合后的桌宠分页视图
 ├── types/
 │   ├── monitor.ts         # MonitorState / MonitorTile 等共享类型
-│   └── window.ts          # WindowState / PetWindowPreferences
+│   ├── window.ts          # WindowState / PetWindowPreferences
+│   └── pet.ts             # PetViewState / 桌宠意图类型
 ├── MonitorApp.tsx         # 主窗口组合根（侧边栏 + 工作区）
 ├── PetApp.tsx             # 透明桌宠窗口组合根
 ├── PetSettingsApp.tsx     # 独立桌宠设置窗口组合根
@@ -59,6 +64,7 @@ src-tauri/src/
 ├── main.rs / lib.rs        # 可执行文件入口 / Tauri 装配与启动
 ├── constants.rs, model.rs, runtime.rs, commands.rs
 ├── device_info.rs, image.rs, heartbeat.rs
+├── pet_paging.rs          # 桌宠容量/分页/首图规则与组合读模型
 ├── window_geometry.rs      # 主窗口/桌宠几何、DPI 与显示器约束
 ├── window_manager.rs       # 模式切换、设置窗口与桌宠交互命令实现
 ├── discovery.rs             # UDP 发现，tokio::net::UdpSocket，纯异步
@@ -81,3 +87,4 @@ src-tauri/src/
 6. 任何源码文件不超过 400 行，见上方"代码门禁"一节；新增功能导致文件超限时先拆分再继续。
 7. 局域网 HTTP API 与 UDP 发现是刻意选择的纯异步实现（Axum + Tokio）；新增接口或网络代码沿用这一模型，不引入手写线程池或阻塞 socket。mDNS 注册（`mdns-sd`）内部自带常驻线程属于第三方库实现细节，不受此约束影响。
 8. `main`、`pet`、`pet-settings` 是固定的 Tauri 窗口标签；窗口互斥、恢复、几何约束和偏好落盘统一由 Rust 管理，前端不得分别直接编排原生窗口状态。`pet-settings` 每次显示前必须按 `pet` 的当前显示器工作区重新定位。
+9. 跨 `MonitorState` 与窗口偏好的派生业务状态必须由 Rust 组合后一次返回；前端只发送用户意图，不计算持久化槽位、补传未修改设置值或并发编排多个原生窗口命令。

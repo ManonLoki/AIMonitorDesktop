@@ -61,7 +61,8 @@ pub(crate) fn make_gif_loop_forever(bytes: &mut Vec<u8>) -> bool {
                     if identifier_end + 5 <= bytes.len()
                         && bytes[identifier_end] == 3 // 子块长度固定为 3
                         && bytes[identifier_end + 1] == 1 // 子块 ID 固定为 1（循环计数）
-                        && bytes[identifier_end + 4] == 0 // 子块列表结尾的终止符
+                        // 子块列表以 0 终止。
+                        && bytes[identifier_end + 4] == 0
                     {
                         bytes[identifier_end + 2] = 0; // 循环次数低字节改为 0（无限循环）
                         bytes[identifier_end + 3] = 0; // 循环次数高字节改为 0
@@ -173,8 +174,10 @@ mod tests {
         // 没有任何应用扩展，直接是图像描述符 + 文件尾
         let mut gif = minimal_gif(b"\x2c\x3b");
 
-        assert!(make_gif_loop_forever(&mut gif)); // 应成功插入新扩展
-        assert_eq!(&gif[13..32], b"\x21\xff\x0bNETSCAPE2.0\x03\x01\x00\x00\x00"); // 新扩展应插入在颜色表结束处（此处即偏移 13）
+        // 应成功插入新扩展。
+        assert!(make_gif_loop_forever(&mut gif));
+        // 新扩展应插入在颜色表结束处（此处即偏移 13）。
+        assert_eq!(&gif[13..32], b"\x21\xff\x0bNETSCAPE2.0\x03\x01\x00\x00\x00");
     }
 
     #[test]

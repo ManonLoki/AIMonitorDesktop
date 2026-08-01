@@ -3,16 +3,25 @@
 use crate::model::{AppMode, PetLayout, PetWindowPreferences, WindowPreferences};
 use crate::pet_geometry::{
     apply_pet_constraints, constrain_pet_to_current_monitor, handle_pet_resize,
-    logical_pet_window_size, pet_layout_dimensions, physical_pet_window_size,
+    logical_pet_window_size, physical_pet_window_size,
 };
 use crate::runtime::SharedRuntime;
 use crate::window_geometry::{capture_window_state, restore_main_window, restore_pet_window};
+use serde::Deserialize;
 use std::sync::MutexGuard;
 use tauri::{AppHandle, Manager, PhysicalPosition, PhysicalSize};
 
 const MAIN_LABEL: &str = "main";
 const PET_LABEL: &str = "pet";
 const PET_SETTINGS_LABEL: &str = "pet-settings";
+const PET_RESIZE_STEP: i16 = 24;
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum PetResizeDirection {
+    Grow,
+    Shrink,
+}
 
 // 本文件几乎每个函数都要加这把锁；统一成一个助手，出错时的提示文案也只维护一处。
 fn windows_lock(runtime: &SharedRuntime) -> Result<MutexGuard<'_, WindowPreferences>, String> {
@@ -20,11 +29,6 @@ fn windows_lock(runtime: &SharedRuntime) -> Result<MutexGuard<'_, WindowPreferen
         .windows
         .lock()
         .map_err(|_| "窗口状态不可用".to_string())
-}
-
-// set_grid（改行列数）与 set_pet_focused_slot（切页）都需要把 focused_slot 收敛到新宫格范围内。
-pub(crate) fn clamp_focused_slot(slot: u8, rows: u8, columns: u8) -> u8 {
-    slot.min(rows.saturating_mul(columns).max(1) - 1)
 }
 
 // 桌宠相关的写操作几乎都以“落盘 + 广播 window-state-changed”收尾，抽成一个助手。
@@ -140,6 +144,11 @@ pub(crate) fn hide_active_window(app: &AppHandle, runtime: &SharedRuntime) -> Re
         .ok_or_else(|| "当前窗口不存在".to_string())?;
     capture_window_state(&window, runtime);
     runtime.save_preferences();
+    if mode == AppMode::Pet {
+        if let Some(settings) = app.get_webview_window(PET_SETTINGS_LABEL) {
+            settings.hide().map_err(|error| error.to_string())?;
+        }
+    }
     window.hide().map_err(|error| error.to_string())
 }
 
@@ -228,17 +237,6 @@ pub(crate) fn set_pet_layout(
     Ok(())
 }
 
-// 桌宠翻页 / 主窗口宫格数变化后，把 focused_slot 收敛到新宫格范围内（见 clamp_focused_slot）。
-pub(crate) fn set_pet_focused_slot(runtime: &SharedRuntime, slot: u8) -> Result<(), String> {
-    let (rows, columns) = {
-        let state = runtime.state.read().map_err(|_| "状态不可用")?;
-        (state.rows, state.columns)
-    };
-    windows_lock(runtime)?.pet_window.focused_slot = clamp_focused_slot(slot, rows, columns);
-    commit(runtime);
-    Ok(())
-}
-
 // 先调用 OS API 生效，成功了才更新内存状态并落盘——避免“偏好里记着开，实际窗口没置顶”。
 pub(crate) fn set_pet_always_on_top(
     app: &AppHandle,
@@ -305,7 +303,7 @@ pub(crate) fn resize_pet_by(
         .ok_or_else(|| "桌宠窗口不存在".to_string())?;
     let scale = window.scale_factor().map_err(|error| error.to_string())?;
     let current_size = window.inner_size().map_err(|error| error.to_string())?;
-    let (_, columns) = pet_layout_dimensions(layout);
+    let (_, columns) = layout.dimensions();
     let current = f64::from(current_size.width) / f64::from(columns) / scale;
     let (min, max) = crate::pet_geometry::pet_size_range(&window, layout);
     let pet_size = (current + f64::from(delta)).clamp(f64::from(min), f64::from(max));
@@ -316,6 +314,19 @@ pub(crate) fn resize_pet_by(
     capture_window_state(&window, runtime);
     commit(runtime);
     Ok(())
+}
+
+// Ctrl/Cmd + 滚轮只传递用户意图，具体步长由 Rust 统一管理。
+pub(crate) fn resize_pet_step(
+    app: &AppHandle,
+    runtime: &SharedRuntime,
+    direction: PetResizeDirection,
+) -> Result<(), String> {
+    let delta = match direction {
+        PetResizeDirection::Grow => PET_RESIZE_STEP,
+        PetResizeDirection::Shrink => -PET_RESIZE_STEP,
+    };
+    resize_pet_by(app, runtime, delta)
 }
 
 // 桌宠区域按下左键拖拽：调用 Tauri 的原生拖拽，由 OS 接管后续的鼠标移动。
