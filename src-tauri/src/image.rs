@@ -4,17 +4,14 @@
 use std::path::Path;
 use tokio::io::AsyncReadExt;
 
-// 通过文件头部的魔数判断图片格式，返回 (扩展名, MIME类型)；不依赖文件名/扩展名，
-// 因为上传的文件名是随机生成的 UUID，必须靠内容本身判断类型。
+// 通过 infer 的文件类型探测返回 (扩展名, MIME类型)；不依赖文件名/扩展名，
+// 并在 infer 支持的众多格式中显式收窄到 API 允许的 JPEG/PNG/GIF。
 pub(crate) fn detect_image(bytes: &[u8]) -> Option<(&'static str, &'static str)> {
-    if bytes.starts_with(&[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a]) {
-        Some(("png", "image/png")) // PNG 文件签名
-    } else if bytes.starts_with(&[0xff, 0xd8, 0xff]) {
-        Some(("jpg", "image/jpeg")) // JPEG 文件签名（SOI 标记）
-    } else if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
-        Some(("gif", "image/gif")) // GIF87a/GIF89a 两种历史版本签名
-    } else {
-        None // 未识别的格式一律拒绝
+    match infer::get(bytes)?.mime_type() {
+        "image/jpeg" => Some(("jpg", "image/jpeg")),
+        "image/png" => Some(("png", "image/png")),
+        "image/gif" => Some(("gif", "image/gif")),
+        _ => None,
     }
 }
 
@@ -156,6 +153,24 @@ mod tests {
         let mut bytes = b"GIF89a\x01\x00\x01\x00\x00\x00\x00".to_vec(); // 签名 + 1x1 逻辑屏幕描述符 + 无颜色表标记
         bytes.extend_from_slice(payload); // 拼接测试用例自定义的后续数据
         bytes
+    }
+
+    #[test]
+    fn detects_only_api_supported_image_formats() {
+        assert_eq!(
+            detect_image(b"\xff\xd8\xff\xe0jpeg"),
+            Some(("jpg", "image/jpeg"))
+        );
+        assert_eq!(
+            detect_image(b"\x89PNG\r\n\x1a\npng"),
+            Some(("png", "image/png"))
+        );
+        assert_eq!(
+            detect_image(b"GIF89a\x01\x00\x01\x00"),
+            Some(("gif", "image/gif"))
+        );
+        assert_eq!(detect_image(b"RIFF\x04\x00\x00\x00WEBP"), None); // infer 可识别 WebP，但 API 不允许
+        assert_eq!(detect_image(b"not an image"), None);
     }
 
     #[test]

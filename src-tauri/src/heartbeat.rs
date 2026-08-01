@@ -59,12 +59,11 @@ pub(crate) fn start_cleanup(runtime: SharedRuntime) {
             let expired = runtime
                 .client_leases
                 .lock()
-                .expect("client lease lock poisoned")
                 .expire(Instant::now(), HEARTBEAT_TIMEOUT);
             if expired.is_empty() {
                 continue;
             }
-            let mut state = runtime.state.write().expect("state lock poisoned");
+            let mut state = runtime.state.write();
             let changed = clear_tiles_owned_by(&mut state.tiles, &expired) > 0;
             drop(state);
             if changed {

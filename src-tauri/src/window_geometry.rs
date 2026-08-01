@@ -185,7 +185,7 @@ pub(crate) fn capture_window_state(window: &WebviewWindow, runtime: &SharedRunti
     if window.is_minimized().unwrap_or(false) {
         return; // 最小化时的坐标/尺寸没有意义，不覆盖已保存的正常状态
     }
-    let mut windows = runtime.windows.lock().expect("window state lock poisoned");
+    let mut windows = runtime.windows.lock();
     if window.label() == MAIN_LABEL {
         windows.main_window.maximized = window.is_maximized().unwrap_or(false);
         if windows.main_window.maximized {

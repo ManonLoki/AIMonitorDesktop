@@ -130,7 +130,7 @@ pub fn run() {
             heartbeat::start_cleanup(runtime.clone()); // 定期清理心跳已过期控制端占用的槽位
             discovery::start_udp_discovery(runtime.clone()); // 启动 UDP 探测响应线程
             mdns::start_mdns(&runtime); // 注册 mDNS 服务
-            runtime.state.write().expect("state lock poisoned").port = port; // 用真实端口覆盖占位值（start_http_server 内部其实已经写过一次，这里是双保险）
+            runtime.state.write().port = port; // 用真实端口覆盖占位值（start_http_server 内部其实已经写过一次，这里是双保险）
             app.manage(tray_menu); // 供设置页命令同步托盘中的“开机自启”勾选状态
             app.manage(runtime.clone()); // 供托盘单实例回调和 Tauri command 取用
             window_manager::show_active_window(app.handle(), &runtime)

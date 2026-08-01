@@ -7,8 +7,8 @@ use crate::pet_geometry::{
 };
 use crate::runtime::SharedRuntime;
 use crate::window_geometry::{capture_window_state, restore_main_window, restore_pet_window};
+use parking_lot::MutexGuard;
 use serde::Deserialize;
-use std::sync::MutexGuard;
 use tauri::{AppHandle, Manager, PhysicalPosition, PhysicalSize};
 
 const MAIN_LABEL: &str = "main";
@@ -23,12 +23,9 @@ pub(crate) enum PetResizeDirection {
     Shrink,
 }
 
-// 本文件几乎每个函数都要加这把锁；统一成一个助手，出错时的提示文案也只维护一处。
-fn windows_lock(runtime: &SharedRuntime) -> Result<MutexGuard<'_, WindowPreferences>, String> {
-    runtime
-        .windows
-        .lock()
-        .map_err(|_| "窗口状态不可用".to_string())
+// 本文件几乎每个函数都要加这把锁；统一成一个助手，保持 guard 类型和调用方式一致。
+fn windows_lock(runtime: &SharedRuntime) -> MutexGuard<'_, WindowPreferences> {
+    runtime.windows.lock()
 }
 
 // 桌宠相关的写操作几乎都以“落盘 + 广播 window-state-changed”收尾，抽成一个助手。
@@ -67,7 +64,7 @@ fn prepare_window(
     let window = app
         .get_webview_window(label_for_mode(mode))
         .ok_or_else(|| "目标窗口不存在".to_string())?;
-    let windows = windows_lock(runtime)?.clone(); // clone 出来后立刻释放锁，恢复窗口的过程不需要一直持锁
+    let windows = windows_lock(runtime).clone(); // clone 出来后立刻释放锁，恢复窗口的过程不需要一直持锁
     match mode {
         AppMode::Main => restore_main_window(&window, &windows.main_window),
         AppMode::Pet => {
@@ -89,7 +86,7 @@ fn prepare_window(
 // 单实例二次启动 / 托盘“显示看板”时调用：不切模式，只是把当前活动模式对应的
 // 窗口恢复位置、取消最小化、显示并聚焦。
 pub(crate) fn show_active_window(app: &AppHandle, runtime: &SharedRuntime) -> Result<(), String> {
-    let mode = windows_lock(runtime)?.active_mode;
+    let mode = windows_lock(runtime).active_mode;
     let window = prepare_window(app, runtime, mode)?;
     window.unminimize().map_err(|error| error.to_string())?;
     window.show().map_err(|error| error.to_string())?;
@@ -104,7 +101,7 @@ pub(crate) fn switch_mode(
     runtime: &SharedRuntime,
     target: AppMode,
 ) -> Result<(), String> {
-    let source_mode = windows_lock(runtime)?.active_mode;
+    let source_mode = windows_lock(runtime).active_mode;
     if source_mode == target {
         return show_active_window(app, runtime); // 目标就是当前模式，退化成普通的显示
     }
@@ -131,14 +128,14 @@ pub(crate) fn switch_mode(
         }
         return Err(error);
     }
-    windows_lock(runtime)?.active_mode = target;
+    windows_lock(runtime).active_mode = target;
     commit(runtime);
     Ok(())
 }
 
 // 托盘“退出”/关闭快捷键触发：只隐藏当前活动窗口（不退出进程，行为等同点关闭按钮）。
 pub(crate) fn hide_active_window(app: &AppHandle, runtime: &SharedRuntime) -> Result<(), String> {
-    let mode = windows_lock(runtime)?.active_mode;
+    let mode = windows_lock(runtime).active_mode;
     let window = app
         .get_webview_window(label_for_mode(mode))
         .ok_or_else(|| "当前窗口不存在".to_string())?;
@@ -200,7 +197,7 @@ pub(crate) fn set_pet_layout(
         .get_webview_window(PET_LABEL)
         .ok_or_else(|| "桌宠窗口不存在".to_string())?;
     capture_window_state(&window, runtime); // 记住切换前的位置，作为下面的锚点用
-    let mut preferences = windows_lock(runtime)?.pet_window.clone();
+    let mut preferences = windows_lock(runtime).pet_window.clone();
     let previous_layout = preferences.layout; // 恢复失败时回滚用
     let previous_size = preferences.pet_size;
     // 切换布局时以当前窗口左上角为锚点；不要跳回该布局上一次保存的位置。
@@ -217,7 +214,7 @@ pub(crate) fn set_pet_layout(
         geometry.height = size.height;
     }
     {
-        let mut windows = windows_lock(runtime)?;
+        let mut windows = windows_lock(runtime);
         windows.pet_window.layout = layout;
         windows.pet_window.pet_size = preferences.pet_size;
     }
@@ -228,7 +225,7 @@ pub(crate) fn set_pet_layout(
         preferences.pet_size,
     ) {
         // 窗口没能恢复成功：把内存状态改回切换前的值，不留下半切换状态。
-        let mut windows = windows_lock(runtime)?;
+        let mut windows = windows_lock(runtime);
         windows.pet_window.layout = previous_layout;
         windows.pet_window.pet_size = previous_size;
         return Err(error.to_string());
@@ -247,14 +244,14 @@ pub(crate) fn set_pet_always_on_top(
         .ok_or_else(|| "桌宠窗口不存在".to_string())?
         .set_always_on_top(enabled)
         .map_err(|error| error.to_string())?;
-    windows_lock(runtime)?.pet_window.always_on_top = enabled;
+    windows_lock(runtime).pet_window.always_on_top = enabled;
     commit(runtime);
     Ok(())
 }
 
 // 锁定桌宠：锁定后拖拽/滚轮缩放会被 start_pet_drag / resize_pet_by 直接短路。
 pub(crate) fn set_pet_locked(runtime: &SharedRuntime, locked: bool) -> Result<(), String> {
-    windows_lock(runtime)?.pet_window.locked = locked;
+    windows_lock(runtime).pet_window.locked = locked;
     commit(runtime);
     Ok(())
 }
@@ -266,7 +263,7 @@ pub(crate) fn set_pet_size(
     runtime: &SharedRuntime,
     size: u16,
 ) -> Result<(), String> {
-    let layout = windows_lock(runtime)?.pet_window.layout;
+    let layout = windows_lock(runtime).pet_window.layout;
     let window = app
         .get_webview_window(PET_LABEL)
         .ok_or_else(|| "桌宠窗口不存在".to_string())?;
@@ -278,7 +275,7 @@ pub(crate) fn set_pet_size(
     window
         .set_size(logical_pet_window_size(layout, size))
         .map_err(|error| error.to_string())?;
-    windows_lock(runtime)?.pet_window.pet_size = size;
+    windows_lock(runtime).pet_window.pet_size = size;
     capture_window_state(&window, runtime); // set_size 后窗口位置可能因为工作区收敛而变化，一并记下来
     commit(runtime);
     Ok(())
@@ -292,7 +289,7 @@ pub(crate) fn resize_pet_by(
     delta: i16,
 ) -> Result<(), String> {
     let (layout, locked) = {
-        let windows = windows_lock(runtime)?;
+        let windows = windows_lock(runtime);
         (windows.pet_window.layout, windows.pet_window.locked)
     };
     if locked {
@@ -310,7 +307,7 @@ pub(crate) fn resize_pet_by(
     window
         .set_size(logical_pet_window_size(layout, pet_size.round() as u16))
         .map_err(|error| error.to_string())?;
-    windows_lock(runtime)?.pet_window.pet_size = pet_size.round() as u16;
+    windows_lock(runtime).pet_window.pet_size = pet_size.round() as u16;
     capture_window_state(&window, runtime);
     commit(runtime);
     Ok(())
@@ -331,7 +328,7 @@ pub(crate) fn resize_pet_step(
 
 // 桌宠区域按下左键拖拽：调用 Tauri 的原生拖拽，由 OS 接管后续的鼠标移动。
 pub(crate) fn start_pet_drag(app: &AppHandle, runtime: &SharedRuntime) -> Result<(), String> {
-    if windows_lock(runtime)?.pet_window.locked {
+    if windows_lock(runtime).pet_window.locked {
         return Ok(()); // 锁定状态下不允许拖拽，静默忽略
     }
     app.get_webview_window(PET_LABEL)

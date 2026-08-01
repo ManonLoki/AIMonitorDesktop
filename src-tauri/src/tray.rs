@@ -6,7 +6,8 @@ use crate::{
     window_geometry::capture_window_state,
     window_manager,
 };
-use std::sync::{Arc, Mutex};
+use parking_lot::Mutex;
+use std::sync::Arc;
 use tauri::{
     menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem},
     tray::TrayIconBuilder,
@@ -36,7 +37,7 @@ impl TrayMenu {
     }
 
     pub(crate) fn set_mode(&self, mode: AppMode) {
-        let locale = *self.locale.lock().expect("tray locale lock poisoned");
+        let locale = *self.locale.lock();
         sync_mode_items(
             &self.menu,
             &self.show_window,
@@ -52,7 +53,7 @@ impl TrayMenu {
     }
 
     pub(crate) fn set_language(&self, locale: ResolvedLocale, mode: AppMode) {
-        *self.locale.lock().expect("tray locale lock poisoned") = locale;
+        *self.locale.lock() = locale;
         let english = locale == ResolvedLocale::English;
         let _ = self.auto_start.set_text(if english {
             "Launch at startup"
@@ -188,7 +189,7 @@ pub fn setup(
                         &switch_for_events,
                         &pet_locked_for_events,
                         target,
-                        *locale_for_events.lock().expect("tray locale lock poisoned"),
+                        *locale_for_events.lock(),
                     );
                 }
             }

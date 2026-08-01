@@ -4,13 +4,14 @@ use crate::constants::FIRST_HTTP_PORT;
 use crate::device_info::{default_device_name, local_ipv4};
 use crate::heartbeat::ClientLeases;
 use crate::model::{MonitorState, MonitorTile, Preferences, WindowPreferences, WindowState};
+use parking_lot::{Mutex, RwLock};
 use std::{
     fs,
     io::Write,
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicU64, Ordering},
-        Arc, Mutex, RwLock,
+        Arc,
     },
     time::Duration,
 };
@@ -78,20 +79,17 @@ impl Runtime {
 
     // 克隆一份当前状态用于响应请求/广播，避免长时间持有锁阻塞其他线程。
     pub(crate) fn snapshot(&self) -> MonitorState {
-        self.state.read().expect("state lock poisoned").clone() // 读锁 + clone，锁在函数返回前就已释放
+        self.state.read().clone() // 读锁 + clone，锁在函数返回前就已释放
     }
 
     // 把当前状态中可持久化的字段写入 preferences.json；调用方在每次状态变更后触发。
     pub(crate) fn save_preferences(&self) {
         // 所有调用方都在进入此函数前释放 state/windows；此处统一按
         // save -> state -> windows 取锁，同时把快照和 persist 纳入一个串行临界区。
-        let _save_guard = self
-            .preferences_save_lock
-            .lock()
-            .expect("preferences save lock poisoned");
+        let _save_guard = self.preferences_save_lock.lock();
         let preferences = {
-            let state = self.state.read().expect("state lock poisoned");
-            let windows = self.windows.lock().expect("window state lock poisoned");
+            let state = self.state.read();
+            let windows = self.windows.lock();
             Preferences {
                 rows: state.rows,
                 columns: state.columns,
@@ -137,7 +135,7 @@ impl Runtime {
     // 算不到时回退到 pet_geometry 里唯一的兜底值，而不是在这里再写一份。
     pub(crate) fn window_snapshot(&self) -> WindowState {
         let (active_mode, pet_window) = {
-            let windows = self.windows.lock().expect("window state lock poisoned");
+            let windows = self.windows.lock();
             (windows.active_mode, windows.pet_window.clone()) // clone 完立刻释放锁，再去查窗口句柄
         };
         // 拿不到桌宠窗口句柄（理论上不会发生，三个窗口在 setup 里就创建好了）时用兜底区间；
@@ -171,7 +169,7 @@ impl Runtime {
         } else {
             manager.disable().map_err(|error| error.to_string())?;
         }
-        self.state.write().map_err(|_| "状态不可用")?.auto_start = enabled;
+        self.state.write().auto_start = enabled;
         self.save_preferences();
         self.changed();
         Ok(())
@@ -179,27 +177,92 @@ impl Runtime {
 
     // 续租控制端心跳；HTTP 端两个入口（心跳接口、更新槽位）共用同一处加锁逻辑。
     pub(crate) fn heartbeat_client(&self, client_id: &str) {
-        self.client_leases
-            .lock()
-            .expect("client lease lock poisoned")
-            .heartbeat(client_id);
+        self.client_leases.lock().heartbeat(client_id);
     }
 }
 
-// 读取 preferences.json；文件不存在或损坏时回退到一组合理默认值（含随机生成的新设备 ID）。
+fn default_preferences() -> Preferences {
+    Preferences {
+        rows: 2,                                                       // 默认 2 行
+        columns: 2,                                                    // 默认 2 列
+        image_display_mode: crate::model::ImageDisplayMode::default(), // 默认等比缩放
+        auto_start: false,                                             // 默认不开机自启
+        language: crate::model::LanguagePreference::default(),         // 默认跟随系统语言
+        windows: WindowPreferences::default(),
+        window: None,
+        device_id: Uuid::new_v4().to_string(), // 首次启动生成一个新的随机设备 ID
+        device_name: default_device_name(),    // 首次启动用主机名作为默认设备名
+    }
+}
+
+// serde_with 会把类型损坏的标量恢复为该类型的 Default；这里再把那些“类型默认值”
+// 不等于产品默认值的字段归一化，避免 0 行宫格或空设备身份进入运行时。
+fn normalize_preferences(mut preferences: Preferences) -> Preferences {
+    if !(1..=5).contains(&preferences.rows) {
+        preferences.rows = 2;
+    }
+    if !(1..=5).contains(&preferences.columns) {
+        preferences.columns = 2;
+    }
+    if preferences.device_id.trim().is_empty() {
+        preferences.device_id = Uuid::new_v4().to_string();
+    }
+    if preferences.device_name.trim().is_empty() {
+        preferences.device_name = default_device_name();
+    }
+    preferences
+}
+
+// 读取 preferences.json；完整文件损坏时回退全部默认值，单个字段类型损坏则由
+// serde_with 在字段/子对象边界恢复，只重置受影响部分而保留设备身份和其他偏好。
 pub(crate) fn load_preferences(path: &Path) -> Preferences {
-    fs::read(path)
+    let preferences = fs::read(path)
         .ok() // 文件不存在/读取失败则转为 None
-        .and_then(|bytes| serde_json::from_slice(&bytes).ok()) // 内容不是合法 JSON 或字段不匹配也转为 None
-        .unwrap_or_else(|| Preferences {
-            rows: 2,                                                       // 默认 2 行
-            columns: 2,                                                    // 默认 2 列
-            image_display_mode: crate::model::ImageDisplayMode::default(), // 默认等比缩放
-            auto_start: false,                                             // 默认不开机自启
-            language: crate::model::LanguagePreference::default(),         // 默认跟随系统语言
-            windows: WindowPreferences::default(),
-            window: None,
-            device_id: Uuid::new_v4().to_string(), // 首次启动生成一个新的随机设备 ID
-            device_name: default_device_name(),    // 首次启动用主机名作为默认设备名
-        })
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_else(default_preferences);
+    normalize_preferences(preferences)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn malformed_field_is_normalized_without_losing_device_identity() {
+        let directory = tempfile::tempdir().expect("temporary directory is available");
+        let path = directory.path().join("preferences.json");
+        fs::write(
+            &path,
+            r#"{
+                "rows": { "invalid": true },
+                "columns": 3,
+                "deviceId": "stable-device-id",
+                "deviceName": "studio-monitor"
+            }"#,
+        )
+        .expect("test preferences are writable");
+
+        let preferences = load_preferences(&path);
+
+        assert_eq!(preferences.rows, 2);
+        assert_eq!(preferences.columns, 3);
+        assert_eq!(preferences.device_id, "stable-device-id");
+        assert_eq!(preferences.device_name, "studio-monitor");
+    }
+
+    #[test]
+    fn empty_recovered_identity_receives_safe_runtime_defaults() {
+        let preferences: Preferences = serde_json::from_value(serde_json::json!({
+            "rows": 2,
+            "columns": 2,
+            "deviceId": null,
+            "deviceName": "   "
+        }))
+        .expect("field-level recovery keeps the document readable");
+
+        let preferences = normalize_preferences(preferences);
+
+        assert!(Uuid::parse_str(&preferences.device_id).is_ok());
+        assert!(!preferences.device_name.trim().is_empty());
+    }
 }

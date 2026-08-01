@@ -1,13 +1,26 @@
 // 设备身份相关的辅助函数：默认设备名称、局域网 IP 探测。
-use std::net::{IpAddr, UdpSocket};
+use std::{
+    ffi::OsStr,
+    net::{IpAddr, UdpSocket},
+};
+
+const DEFAULT_DEVICE_NAME: &str = "AIMonitorDesktop";
+
+// 主机名由操作系统提供，可能不是 UTF-8，也可能只包含空白。
+// 只接受可安全展示的非空 UTF-8 文本，并去掉两端空白。
+fn clean_hostname(hostname: Option<&OsStr>) -> String {
+    hostname
+        .and_then(OsStr::to_str)
+        .map(str::trim)
+        .filter(|hostname| !hostname.is_empty())
+        .unwrap_or(DEFAULT_DEVICE_NAME)
+        .to_owned()
+}
 
 // 首次启动、没有历史偏好时，用主机名作为默认设备名称。
 pub(crate) fn default_device_name() -> String {
-    std::env::var("COMPUTERNAME") // Windows 下的主机名环境变量
-        .or_else(|_| std::env::var("HOSTNAME")) // macOS/Linux 下常见的主机名环境变量
-        .ok() // 转成 Option，读取失败则丢弃错误
-        .filter(|name| !name.trim().is_empty()) // 过滤掉空字符串主机名
-        .unwrap_or_else(|| "AIMonitorDesktop".into()) // 两者都取不到时的兜底默认名
+    let hostname = hostname::get().ok();
+    clean_hostname(hostname.as_deref())
 }
 
 // 通过"连接"一个公网地址（不会真的发包，UDP 是无连接协议）来让操作系统
@@ -24,4 +37,42 @@ pub(crate) fn local_ipv4() -> String {
             _ => None, // IPv6 或回环地址都视为无效
         })
         .unwrap_or_else(|| "未连接局域网".into()) // 拿不到有效 IP 时展示的兜底文案
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hostname_cleaning_trims_displayable_names_and_rejects_empty_ones() {
+        assert_eq!(
+            clean_hostname(Some(OsStr::new("  studio-monitor  "))),
+            "studio-monitor"
+        );
+        assert_eq!(
+            clean_hostname(Some(OsStr::new(" \t\n "))),
+            DEFAULT_DEVICE_NAME
+        );
+        assert_eq!(clean_hostname(None), DEFAULT_DEVICE_NAME);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn hostname_cleaning_rejects_non_utf8_names() {
+        use std::os::unix::ffi::OsStrExt;
+
+        assert_eq!(
+            clean_hostname(Some(OsStr::from_bytes(b"monitor-\xff"))),
+            DEFAULT_DEVICE_NAME
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn hostname_cleaning_rejects_non_utf8_names() {
+        use std::{ffi::OsString, os::windows::ffi::OsStringExt};
+
+        let hostname = OsString::from_wide(&[0xD800]);
+        assert_eq!(clean_hostname(Some(&hostname)), DEFAULT_DEVICE_NAME);
+    }
 }

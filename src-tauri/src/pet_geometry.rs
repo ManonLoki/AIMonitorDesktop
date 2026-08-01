@@ -115,22 +115,19 @@ fn keep_pet_aspect_for_resolved_monitor(
     monitor: Option<&Monitor>,
 ) {
     // 只加一次锁就把本次要用的 layout 和上一次保存的几何都读出来，避免连续两次 lock。
-    let (layout, previous) = runtime
-        .windows
-        .lock()
-        .map(|windows| {
-            let layout = windows.pet_window.layout;
-            let previous = match layout {
-                PetLayout::Single => windows.pet_window.single_geometry.clone(),
-                PetLayout::Row => windows.pet_window.row_geometry.clone(),
-                PetLayout::Column => windows.pet_window.column_geometry.clone(),
-                PetLayout::Row3 => windows.pet_window.row3_geometry.clone(),
-                PetLayout::Column3 => windows.pet_window.column3_geometry.clone(),
-                PetLayout::Grid => windows.pet_window.grid_geometry.clone(),
-            };
-            (layout, previous)
-        })
-        .unwrap_or_default();
+    let (layout, previous) = {
+        let windows = runtime.windows.lock();
+        let layout = windows.pet_window.layout;
+        let previous = match layout {
+            PetLayout::Single => windows.pet_window.single_geometry.clone(),
+            PetLayout::Row => windows.pet_window.row_geometry.clone(),
+            PetLayout::Column => windows.pet_window.column_geometry.clone(),
+            PetLayout::Row3 => windows.pet_window.row3_geometry.clone(),
+            PetLayout::Column3 => windows.pet_window.column3_geometry.clone(),
+            PetLayout::Grid => windows.pet_window.grid_geometry.clone(),
+        };
+        (layout, previous)
+    };
     // 把上一次保存的几何换算到当前显示器的缩放比例下，才能跟本次 resize 事件的物理像素比较。
     let previous = previous.map(|geometry| {
         size_for_scale(
@@ -159,11 +156,18 @@ fn keep_pet_aspect_for_resolved_monitor(
         let _ = window.set_size(expected);
     }
     // 尺寸真的变化了才落盘 + 广播，避免每次 resize tick 都写 preferences.json。
-    if let Ok(mut windows) = runtime.windows.lock() {
+    let changed = {
+        let mut windows = runtime.windows.lock();
         if windows.pet_window.pet_size != pet_size {
             windows.pet_window.pet_size = pet_size;
-            runtime.window_changed();
+            true
+        } else {
+            false
         }
+    };
+    if changed {
+        // 先释放窗口状态锁再广播，避免事件处理方同步读取同一把锁时形成重入死锁。
+        runtime.window_changed();
     }
 }
 
@@ -171,11 +175,7 @@ fn keep_pet_aspect_for_resolved_monitor(
 // 再用当前窗口尺寸跑一遍“保持布局宽高比”的收敛逻辑（新显示器允许的区间可能比旧的更小）。
 pub(crate) fn constrain_pet_to_current_monitor(window: &WebviewWindow, runtime: &SharedRuntime) {
     let monitor = resolve_pet_monitor(window); // 只查一次，下面两步复用同一个显示器
-    let layout = runtime
-        .windows
-        .lock()
-        .map(|windows| windows.pet_window.layout)
-        .unwrap_or_default();
+    let layout = runtime.windows.lock().pet_window.layout;
     let _ = apply_pet_constraints_for_resolved_monitor(window, monitor.as_ref(), layout);
     let Ok(size) = window.inner_size() else {
         return;

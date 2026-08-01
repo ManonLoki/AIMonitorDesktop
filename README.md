@@ -5,7 +5,7 @@ English | [简体中文](./Readme_zh.md)
 A desktop monitoring client for displaying and managing AI task status across a
 local network, developed by ManonLoki.
 
-Current version: `2.0.4`. The current architecture is built around multiple
+Current version: `2.0.5`. The current architecture is built around multiple
 native windows, a Rust-owned shared runtime state, desktop pet mode, and a
 bilingual English/Chinese interface.
 

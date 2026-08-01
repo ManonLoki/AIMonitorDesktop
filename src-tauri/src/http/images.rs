@@ -1,13 +1,12 @@
 // POST/GET /api/images 与 GET/DELETE /api/images/{filename}：图片上传、分页列表、下载与删除。
 // 所有文件 I/O 都走 tokio::fs（见 image.rs 的 probe_image_file），保持整条请求链路
-// 纯异步、不阻塞 Tokio 工作线程；multipart 解析仍是手写的小函数，因为图片上传接口
-// 只有一个文件字段，不需要为此引入完整的 multipart 依赖。
+// 纯异步、不阻塞 Tokio 工作线程；multipart 的 boundary 与字段解析交给 Axum。
 use super::error_json;
 use crate::image::{detect_image, make_gif_loop_forever, probe_image_file, safe_image_filename};
 use crate::runtime::SharedRuntime;
 use axum::{
     body::Bytes,
-    extract::{Path, Query, State},
+    extract::{FromRequest, Multipart, Path, Query, Request, State},
     http::{header, HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     Json,
@@ -26,47 +25,74 @@ pub(crate) struct Pagination {
     limit: Option<String>,
 }
 
-// 从 multipart/form-data 请求体中截取第一个字段的原始内容。非 multipart 请求
-// 直接把整个 body 当作文件内容（兼容非浏览器客户端直接 POST 二进制的场景）。
-fn extract_multipart(body: &[u8], content_type: &str) -> Option<Vec<u8>> {
-    if !content_type
-        .to_ascii_lowercase()
-        .starts_with("multipart/form-data")
-    {
-        return Some(body.to_vec()); // 非 multipart，直接把整个请求体当作文件内容
+fn required_file_error() -> Response {
+    error_json(StatusCode::BAD_REQUEST, "an image file is required")
+}
+
+// 这个分支只判断请求是否应交给 Multipart 提取器，不自行解析 boundary。
+fn is_multipart_form(headers: &HeaderMap) -> bool {
+    headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(';').next())
+        .is_some_and(|mime| mime.trim().eq_ignore_ascii_case("multipart/form-data"))
+}
+
+// 保留 Axum 提取器的 413，交给外层 normalize_body_limit_rejection 统一改写为 JSON；
+// 其他 body/multipart 解析失败都映射为 Android API 约定的 required 错误。
+fn normalize_upload_rejection(response: Response) -> Response {
+    if response.status() == StatusCode::PAYLOAD_TOO_LARGE {
+        response
+    } else {
+        required_file_error()
     }
-    // 从 Content-Type 头里提取 boundary 参数。
-    let boundary = content_type
-        .split(';')
-        .find_map(|part| part.trim().strip_prefix("boundary="))?
-        .trim_matches('"'); // 部分客户端会给 boundary 加引号，去掉它
-    let marker = format!("--{boundary}").into_bytes(); // multipart 每个分段前的边界标记
-    let header_end = body.windows(4).position(|window| window == b"\r\n\r\n")? + 4; // 字段内容从第一个空行之后开始
-    let suffix = [b"\r\n--".as_slice(), boundary.as_bytes()].concat(); // 内容结尾处紧跟的下一个边界前缀
-    let end = body[header_end..]
-        .windows(suffix.len())
-        .position(|window| window == suffix)?
-        + header_end;
-    if !body.starts_with(&marker) || end <= header_end {
-        return None; // 请求体不是以边界开头，或找不到有效的内容区间，视为格式错误
+}
+
+// multipart 只接受 API 约定的 `file` 字段，或显式带 filename 的文件字段；
+// 普通文本字段会被跳过。非 multipart 客户端仍可直接 POST 原始二进制。
+async fn extract_upload_bytes(request: Request) -> Result<Bytes, Response> {
+    if !is_multipart_form(request.headers()) {
+        let bytes = Bytes::from_request(request, &())
+            .await
+            .map_err(|rejection| normalize_upload_rejection(rejection.into_response()))?;
+        return (!bytes.is_empty())
+            .then_some(bytes)
+            .ok_or_else(required_file_error);
     }
-    Some(body[header_end..end].to_vec()) // 截取头部结束到下一个边界之间的原始字节
+
+    let mut multipart = Multipart::from_request(request, &())
+        .await
+        .map_err(|rejection| normalize_upload_rejection(rejection.into_response()))?;
+    loop {
+        let field = multipart
+            .next_field()
+            .await
+            .map_err(|error| normalize_upload_rejection(error.into_response()))?;
+        let Some(field) = field else {
+            return Err(required_file_error());
+        };
+        if field.name() != Some("file") && field.file_name().is_none() {
+            continue;
+        }
+        let bytes = field
+            .bytes()
+            .await
+            .map_err(|error| normalize_upload_rejection(error.into_response()))?;
+        if !bytes.is_empty() {
+            return Ok(bytes);
+        }
+    }
 }
 
 // POST /api/images：从请求体里取出文件字节，靠魔数校验是受支持的图片格式后，
 // 以随机 UUID 命名落盘，避免信任客户端提供的原始文件名。
 pub(crate) async fn upload_image(
     State(runtime): State<SharedRuntime>,
-    headers: HeaderMap,
-    body: Bytes,
+    request: Request,
 ) -> Response {
-    let content_type = headers
-        .get(header::CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or("");
-    let Some(mut bytes) = extract_multipart(&body, content_type) else {
-        // multipart 解析失败，说明没有携带有效文件字段。
-        return error_json(StatusCode::BAD_REQUEST, "an image file is required");
+    let mut bytes = match extract_upload_bytes(request).await {
+        Ok(bytes) => bytes.to_vec(),
+        Err(response) => return response,
     };
     let Some((extension, _)) = detect_image(&bytes) else {
         return error_json(
@@ -175,7 +201,7 @@ pub(crate) async fn delete_image(
     let image_path = runtime.image_dir.join(&filename);
     if tokio::fs::remove_file(&image_path).await.is_ok() {
         {
-            let mut state = runtime.state.write().expect("state lock poisoned"); // 写锁保护，遍历并修改宫格数组
+            let mut state = runtime.state.write(); // 写锁保护，遍历并修改宫格数组
             for tile in &mut state.tiles {
                 if tile.image_filename.as_deref() == Some(filename.as_str()) {
                     tile.image_filename = None; // 清空对已删除图片的引用
@@ -186,5 +212,137 @@ pub(crate) async fn delete_image(
         Json(json!({ "status": "deleted", "filename": filename })).into_response()
     } else {
         error_json(StatusCode::NOT_FOUND, "image not found") // 文件本就不存在或删除失败（如权限问题）
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::{to_bytes, Body};
+    use axum::extract::DefaultBodyLimit;
+
+    fn request(content_type: Option<&str>, body: impl Into<Body>) -> Request {
+        let mut builder = Request::builder();
+        if let Some(content_type) = content_type {
+            builder = builder.header(header::CONTENT_TYPE, content_type);
+        }
+        builder.body(body.into()).expect("test request is valid")
+    }
+
+    async fn assert_required(request: Request) {
+        let response = extract_upload_bytes(request)
+            .await
+            .expect_err("request must not contain an upload");
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("error body is readable");
+        assert_eq!(body, r#"{"error":"an image file is required"}"#);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn accepts_raw_binary_upload() {
+        let bytes = extract_upload_bytes(request(
+            Some("application/octet-stream"),
+            Body::from(&b"raw image bytes"[..]),
+        ))
+        .await
+        .expect("raw request body is the upload");
+
+        assert_eq!(bytes, &b"raw image bytes"[..]);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn skips_text_field_before_named_file() {
+        let body = concat!(
+            "--boundary\r\n",
+            "Content-Disposition: form-data; name=\"description\"\r\n\r\n",
+            "not the file\r\n",
+            "--boundary\r\n",
+            "Content-Disposition: form-data; name=\"file\"\r\n\r\n",
+            "actual file\r\n",
+            "--boundary--\r\n",
+        );
+
+        let bytes = extract_upload_bytes(request(
+            Some("multipart/form-data; boundary=boundary"),
+            body,
+        ))
+        .await
+        .expect("named file field is selected");
+
+        assert_eq!(bytes, "actual file");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn accepts_quoted_boundary_and_filename_field() {
+        let body = concat!(
+            "--quoted-boundary\r\n",
+            "Content-Disposition: form-data; name=\"upload\"; filename=\"image.png\"\r\n",
+            "Content-Type: image/png\r\n\r\n",
+            "file by filename\r\n",
+            "--quoted-boundary--\r\n",
+        );
+
+        let bytes = extract_upload_bytes(request(
+            Some("multipart/form-data; boundary=\"quoted-boundary\""),
+            body,
+        ))
+        .await
+        .expect("filename marks the field as a file upload");
+
+        assert_eq!(bytes, "file by filename");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn rejects_multipart_without_file_field() {
+        let body = concat!(
+            "--boundary\r\n",
+            "Content-Disposition: form-data; name=\"description\"\r\n\r\n",
+            "text only\r\n",
+            "--boundary--\r\n",
+        );
+        assert_required(request(
+            Some("multipart/form-data; boundary=boundary"),
+            body,
+        ))
+        .await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn rejects_empty_file_and_invalid_boundary() {
+        let empty_file = concat!(
+            "--boundary\r\n",
+            "Content-Disposition: form-data; name=\"file\"; filename=\"empty.png\"\r\n\r\n",
+            "\r\n--boundary--\r\n",
+        );
+        assert_required(request(
+            Some("multipart/form-data; boundary=boundary"),
+            empty_file,
+        ))
+        .await;
+        assert_required(request(Some("multipart/form-data"), "not multipart")).await;
+        assert_required(request(
+            Some("multipart/form-data; boundary=\"\""),
+            "not multipart",
+        ))
+        .await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn preserves_payload_too_large_for_outer_json_normalizer() {
+        let body = concat!(
+            "--boundary\r\n",
+            "Content-Disposition: form-data; name=\"file\"; filename=\"large.png\"\r\n\r\n",
+            "this payload is deliberately over the test limit\r\n",
+            "--boundary--\r\n",
+        );
+        let mut request = request(Some("multipart/form-data; boundary=boundary"), body);
+        DefaultBodyLimit::max(32).apply(&mut request);
+
+        let response = extract_upload_bytes(request)
+            .await
+            .expect_err("body limit must reject the upload");
+        assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
     }
 }

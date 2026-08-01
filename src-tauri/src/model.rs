@@ -2,6 +2,7 @@
 // 这些类型通过 serde 在 Rust ↔ 前端 JSON 之间转换，字段命名需要和
 // src/types/monitor.ts 中的 TypeScript 类型保持一致（camelCase 由 serde 自动转换而来）。
 use serde::{Deserialize, Serialize};
+use serde_with::{serde_as, DefaultOnError};
 
 // 单个监控宫格的数据。Default 用于清空宫格（DELETE /api/slots/{slot}）。
 #[derive(Clone, Serialize, Deserialize, Default)]
@@ -113,11 +114,14 @@ impl PetLayout {
     }
 }
 
+#[serde_as]
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct MainWindowPreferences {
+    #[serde_as(deserialize_as = "DefaultOnError")]
     #[serde(default)]
     pub(crate) normal_geometry: Option<WindowGeometry>,
+    #[serde_as(deserialize_as = "DefaultOnError")]
     #[serde(default)]
     pub(crate) maximized: bool,
 }
@@ -130,29 +134,39 @@ fn default_true() -> bool {
     true
 }
 
+#[serde_as]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct PetWindowPreferences {
+    #[serde_as(deserialize_as = "DefaultOnError")]
     #[serde(default)]
     pub(crate) layout: PetLayout,
+    #[serde_as(deserialize_as = "DefaultOnError")]
     #[serde(default)]
     pub(crate) focused_slot: u8,
+    #[serde_as(deserialize_as = "DefaultOnError")]
     #[serde(default)]
     pub(crate) single_geometry: Option<WindowGeometry>,
+    #[serde_as(deserialize_as = "DefaultOnError")]
     #[serde(default)]
     pub(crate) row_geometry: Option<WindowGeometry>,
+    #[serde_as(deserialize_as = "DefaultOnError")]
     #[serde(default)]
     pub(crate) column_geometry: Option<WindowGeometry>,
+    #[serde_as(deserialize_as = "DefaultOnError")]
     #[serde(default)]
     pub(crate) row3_geometry: Option<WindowGeometry>,
+    #[serde_as(deserialize_as = "DefaultOnError")]
     #[serde(default)]
     pub(crate) column3_geometry: Option<WindowGeometry>,
+    #[serde_as(deserialize_as = "DefaultOnError")]
     #[serde(default)]
     pub(crate) grid_geometry: Option<WindowGeometry>,
     #[serde(default = "default_pet_size")]
     pub(crate) pet_size: u16,
     #[serde(default = "default_true")]
     pub(crate) always_on_top: bool,
+    #[serde_as(deserialize_as = "DefaultOnError")]
     #[serde(default)]
     pub(crate) locked: bool,
 }
@@ -175,13 +189,18 @@ impl Default for PetWindowPreferences {
     }
 }
 
+#[serde_as]
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct WindowPreferences {
+    #[serde_as(deserialize_as = "DefaultOnError")]
     #[serde(default)]
     pub(crate) active_mode: AppMode,
+    #[serde_as(deserialize_as = "DefaultOnError")]
     #[serde(default)]
     pub(crate) main_window: MainWindowPreferences,
+    // pet_size 和 always_on_top 有产品特定默认值，由子对象边界统一兜底。
+    #[serde_as(deserialize_as = "DefaultOnError")]
     #[serde(default)]
     pub(crate) pet_window: PetWindowPreferences,
 }
@@ -197,27 +216,66 @@ pub(crate) struct WindowState {
 
 // 落盘到 preferences.json 的用户偏好，是 MonitorState 的一个持久化子集
 // （端口、运行中标记、本机 IP、宫格内容都是运行期派生值，不需要持久化）。
+#[serde_as]
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Preferences {
-    pub(crate) rows: u8,                             // 持久化的宫格行数
-    pub(crate) columns: u8,                          // 持久化的宫格列数
+    #[serde_as(deserialize_as = "DefaultOnError")]
+    #[serde(default)]
+    pub(crate) rows: u8, // 持久化的宫格行数
+    #[serde_as(deserialize_as = "DefaultOnError")]
+    #[serde(default)]
+    pub(crate) columns: u8, // 持久化的宫格列数
+    #[serde_as(deserialize_as = "DefaultOnError")]
+    #[serde(default)]
     pub(crate) image_display_mode: ImageDisplayMode, // 持久化的图片显示模式
+    #[serde_as(deserialize_as = "DefaultOnError")]
     #[serde(default)] // 旧版本偏好文件里可能没有这个字段，缺省为 false
     pub(crate) auto_start: bool,
+    #[serde_as(deserialize_as = "DefaultOnError")]
     #[serde(default)]
     pub(crate) language: LanguagePreference,
+    #[serde_as(deserialize_as = "DefaultOnError")]
     #[serde(default)]
     pub(crate) windows: WindowPreferences,
+    #[serde_as(deserialize_as = "DefaultOnError")]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) window: Option<WindowGeometry>, // 仅用于迁移 1.1 及更早版本
-    pub(crate) device_id: String,   // 持久化的设备 ID，跨重启保持稳定
+    #[serde_as(deserialize_as = "DefaultOnError")]
+    #[serde(default)]
+    pub(crate) device_id: String, // 持久化的设备 ID，跨重启保持稳定
+    #[serde_as(deserialize_as = "DefaultOnError")]
+    #[serde(default)]
     pub(crate) device_name: String, // 持久化的设备名称
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn complete_preferences() -> serde_json::Value {
+        serde_json::json!({
+            "rows": 2,
+            "columns": 3,
+            "imageDisplayMode": "FILL_CROP",
+            "autoStart": true,
+            "language": "en",
+            "windows": {
+                "activeMode": "pet",
+                "mainWindow": { "maximized": true },
+                "petWindow": {
+                    "layout": "row",
+                    "focusedSlot": 1,
+                    "petSize": 80,
+                    "alwaysOnTop": false,
+                    "locked": true
+                }
+            },
+            "window": { "x": 20, "y": 30, "width": 800, "height": 600 },
+            "deviceId": "stable-device-id",
+            "deviceName": "studio-monitor"
+        })
+    }
 
     #[test]
     fn old_preferences_receive_safe_window_defaults() {
@@ -240,6 +298,39 @@ mod tests {
             preferences.window.expect("legacy geometry").scale_factor,
             0.0
         );
+    }
+
+    #[test]
+    fn malformed_field_does_not_discard_device_identity() {
+        let mut value = complete_preferences();
+        value["rows"] = serde_json::json!({ "invalid": true });
+
+        let preferences: Preferences =
+            serde_json::from_value(value).expect("one malformed field should use its default");
+
+        assert_eq!(preferences.rows, 0);
+        assert_eq!(preferences.columns, 3);
+        assert_eq!(preferences.device_id, "stable-device-id");
+        assert_eq!(preferences.device_name, "studio-monitor");
+    }
+
+    #[test]
+    fn malformed_nested_pet_and_legacy_window_only_reset_those_objects() {
+        let mut value = complete_preferences();
+        value["windows"]["petWindow"]["alwaysOnTop"] = serde_json::json!("invalid");
+        value["window"]["width"] = serde_json::json!("invalid");
+
+        let preferences: Preferences = serde_json::from_value(value)
+            .expect("malformed nested objects should use boundary defaults");
+
+        assert_eq!(preferences.windows.active_mode, AppMode::Pet);
+        assert!(preferences.windows.main_window.maximized);
+        assert_eq!(preferences.windows.pet_window.layout, PetLayout::Grid);
+        assert_eq!(preferences.windows.pet_window.pet_size, default_pet_size());
+        assert!(preferences.windows.pet_window.always_on_top);
+        assert!(!preferences.windows.pet_window.locked);
+        assert!(preferences.window.is_none());
+        assert_eq!(preferences.device_id, "stable-device-id");
     }
 
     #[test]

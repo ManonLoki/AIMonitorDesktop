@@ -34,7 +34,7 @@ pub(crate) async fn clear_slot(
         Ok(index) => index,
         Err(message) => return error_json(StatusCode::NOT_FOUND, message),
     };
-    runtime.state.write().expect("state lock poisoned").tiles[index] = MonitorTile::default();
+    runtime.state.write().tiles[index] = MonitorTile::default();
     runtime.changed(); // 通知前端刷新
     Json(json!({ "status": "cleared", "slot": index + 1 })).into_response() // 响应里的 slot 换算回对外的 1 起始编号
 }
@@ -93,7 +93,7 @@ pub(crate) async fn update_slot(
         );
     }
     runtime.heartbeat_client(client_id);
-    runtime.state.write().expect("state lock poisoned").tiles[index] = MonitorTile {
+    runtime.state.write().tiles[index] = MonitorTile {
         client_id: client_id.into(),
         username: username.into(),
         ai_name: ai_name.into(),

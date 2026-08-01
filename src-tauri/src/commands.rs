@@ -34,10 +34,10 @@ fn patch_grid(
     validate_grid_axis(requested_rows)?;
     validate_grid_axis(requested_columns)?;
     {
-        let mut state = runtime.state.write().map_err(|_| "状态不可用")?;
+        let mut state = runtime.state.write();
         let rows = requested_rows.unwrap_or(state.rows);
         let columns = requested_columns.unwrap_or(state.columns);
-        let mut windows = runtime.windows.lock().map_err(|_| "窗口状态不可用")?;
+        let mut windows = runtime.windows.lock();
         state.rows = rows;
         state.columns = columns;
         windows.pet_window.focused_slot =
@@ -77,8 +77,8 @@ pub(crate) fn get_pet_view_state(
     runtime: State<'_, SharedRuntime>,
 ) -> Result<PetViewState, String> {
     // 同时持有两份读取所需的锁，避免组装出不同时刻的混合快照。
-    let state = runtime.state.read().map_err(|_| "状态不可用")?;
-    let windows = runtime.windows.lock().map_err(|_| "窗口状态不可用")?;
+    let state = runtime.state.read();
+    let windows = runtime.windows.lock();
     Ok(build_pet_view_state(&state, &windows.pet_window))
 }
 
@@ -87,8 +87,8 @@ fn patch_pet_focus(
     select: impl FnOnce(&MonitorState, &crate::model::PetWindowPreferences) -> Option<u8>,
 ) -> Result<bool, String> {
     let changed = {
-        let state = runtime.state.read().map_err(|_| "状态不可用")?;
-        let mut windows = runtime.windows.lock().map_err(|_| "窗口状态不可用")?;
+        let state = runtime.state.read();
+        let mut windows = runtime.windows.lock();
         let Some(selected) = select(&state, &windows.pet_window) else {
             return Ok(false);
         };
@@ -145,11 +145,7 @@ pub(crate) fn set_image_display_mode(
     runtime: State<'_, SharedRuntime>,
     mode: ImageDisplayMode,
 ) -> Result<(), String> {
-    runtime
-        .state
-        .write()
-        .map_err(|_| "状态不可用")?
-        .image_display_mode = mode; // 加写锁后直接赋值新的显示模式
+    runtime.state.write().image_display_mode = mode; // 加写锁后直接赋值新的显示模式
     runtime.save_preferences(); // 持久化
     runtime.changed(); // 通知前端刷新
     Ok(())
@@ -165,7 +161,7 @@ pub(crate) fn set_device_name(
     if safe_name.is_empty() {
         return Err("设备名称不能为空".into()); // 清洗后为空说明原始输入全是空白，拒绝保存
     }
-    runtime.state.write().map_err(|_| "状态不可用")?.device_name = safe_name; // 写入清洗后的名称
+    runtime.state.write().device_name = safe_name; // 写入清洗后的名称
     runtime.save_preferences(); // 持久化
     runtime.changed(); // 通知前端刷新
     Ok(())
@@ -187,7 +183,7 @@ pub(crate) fn set_language(
     runtime: State<'_, SharedRuntime>,
     language: LanguagePreference,
 ) -> Result<(), String> {
-    runtime.state.write().map_err(|_| "状态不可用")?.language = language;
+    runtime.state.write().language = language;
     runtime.save_preferences();
     runtime.changed();
     Ok(())

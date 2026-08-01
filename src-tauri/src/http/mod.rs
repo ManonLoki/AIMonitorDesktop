@@ -93,7 +93,7 @@ pub(crate) fn start_http_server(runtime: SharedRuntime) -> u16 {
     let listener = tauri::async_runtime::block_on(bind_first_available_port());
     let port = listener.local_addr().expect("HTTP 监听地址不可用").port();
     {
-        let mut state = runtime.state.write().expect("state lock poisoned"); // 加写锁回填真实监听端口与运行状态
+        let mut state = runtime.state.write(); // 加写锁回填真实监听端口与运行状态
         state.port = port;
         state.is_server_running = true;
     }
@@ -119,4 +119,33 @@ async fn bind_first_available_port() -> TcpListener {
         }
     }
     panic!("没有可用的 HTTP 端口"); // 极端情况下所有端口都被占用，直接 panic 终止启动
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::{
+        body::{to_bytes, Body, Bytes},
+        http::Request,
+    };
+    use tower::ServiceExt;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn body_limit_rejection_uses_android_json_contract() {
+        let app = Router::new()
+            .route("/upload", post(|_: Bytes| async { StatusCode::NO_CONTENT }))
+            .layer(DefaultBodyLimit::max(4))
+            .layer(middleware::from_fn(normalize_body_limit_rejection));
+        let request = Request::post("/upload")
+            .body(Body::from("12345"))
+            .expect("test request is valid");
+
+        let response = app.oneshot(request).await.expect("router is infallible");
+
+        assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("error body is readable");
+        assert_eq!(body, r#"{"error":"request body too large"}"#);
+    }
 }
